@@ -3,15 +3,12 @@
 import { useState, useEffect, useRef } from 'react';
 
 // ═══════════════════════════════════════════════════════════════
-// TYPES & CONSTANTS
+// CONSTANTS & TYPES
 // ═══════════════════════════════════════════════════════════════
 
 type SubjectID = 'alg' | 'csp' | 'aphu' | 'bio' | 'eng' | 'spa' | 'band';
 
-interface GradeEntry { 
-  earned: number; 
-  possible: number; 
-}
+interface GradeEntry { earned: number; possible: number; }
 
 interface ClassData {
   id: SubjectID;
@@ -21,12 +18,7 @@ interface ClassData {
   summative: GradeEntry[];
 }
 
-interface LogEntry {
-  type: 'success' | 'error' | 'info' | 'breach' | 'sim';
-  message: string;
-}
-
-// CONSTANTS
+// KHS Scale (Base 4.0)
 const GPA_SCALE = [
   [97, 100, 4.0], [93, 96, 3.8], [90, 92, 3.6], 
   [87, 89, 3.4], [83, 86, 3.2], [80, 82, 3.0],
@@ -34,6 +26,7 @@ const GPA_SCALE = [
   [0, 69, 0.0]
 ];
 
+// SUBJECT CONFIGURATION (Band is L2)
 const SUBJECT_MAP: { [key: string]: { name: string; id: SubjectID; level: 'L1' | 'L2' } } = {
   'm': { name: 'Algebra II', id: 'alg', level: 'L1' },
   'cs': { name: 'AP CSP', id: 'csp', level: 'L1' },
@@ -41,16 +34,21 @@ const SUBJECT_MAP: { [key: string]: { name: string; id: SubjectID; level: 'L1' |
   'b': { name: 'Biology', id: 'bio', level: 'L1' },
   'e': { name: 'English 1', id: 'eng', level: 'L1' },
   's': { name: 'Spanish 2', id: 'spa', level: 'L1' },
-  'vb': { name: 'Varsity Band', id: 'band', level: 'L1' },
+  'vb': { name: 'Varsity Band', id: 'band', level: 'L2' }, // L2 ASSET
 };
 
-// Foundation: Geometry (8th Grade) - Banked Asset
-const FOUNDATION = { credits: 1.0, gpa: 5.5 };
+// BANKED ASSETS (Geometry)
+const BANKED = { credits: 1.0, gpa: 5.5 };
 
-// Target: 5.75 Cumulative GPA
-const TARGET_GPA = 5.75;
-// Total Credits Target (Foundation + 7 Classes = 8.0)
-const TOTAL_CREDITS_GOAL = 8.0; 
+// INTERCEPT CALCULATION
+// Goal: 5.75 Cumulative over 8.0 Credits.
+// (Banked + Current) / 8.0 = 5.75
+// (5.5 + Current) = 46.0
+// Current Required = 40.5
+// Per Class (7 classes) = 40.5 / 7 = 5.7857...
+const REQUIRED_TOTAL_POINTS = 5.75 * 8.0; // 46.0
+const REQUIRED_FRESHMAN_POINTS = REQUIRED_TOTAL_POINTS - (BANKED.gpa * BANKED.credits); // 40.5
+const REQUIRED_VELOCITY = REQUIRED_FRESHMAN_POINTS / 7.0; // 5.786
 
 // ═══════════════════════════════════════════════════════════════
 // UTILITY FUNCTIONS
@@ -64,129 +62,56 @@ function sumGrades(arr: GradeEntry[]): { earned: number, possible: number } {
   }, { earned: 0, possible: 0 });
 }
 
-function getClassGradePercent(f: GradeEntry[], s: GradeEntry[]): number {
-  // If no grades, assume 100% to prevent NaN
-  if (f.length === 0 && s.length === 0) return 100;
-
+function getClassPercent(f: GradeEntry[], s: GradeEntry[]): number {
   const fSum = sumGrades(f);
   const sSum = sumGrades(s);
   
-  // Calculate weighted points
-  // Formative is 30% of grade, Summative is 70%
-  // We need to calculate the percentage based on total points per category?
-  // No, schools usually do: (F_Avg * 0.3) + (S_Avg * 0.7).
-  // BUT, for "Total Points" accuracy with weighted categories:
-  // We treat the "Weight" as a multiplier for the points.
-  
-  // Total "Points" = (FormativeEarned / FormativePossible) * 30 + (SummativeEarned / SummativePossible) * 70
-  // This maintains the 30/70 split while respecting point totals.
-  
+  if (fSum.possible === 0 && sSum.possible === 0) return 100; // Default to perfect
+
   const fAvg = fSum.possible > 0 ? (fSum.earned / fSum.possible) * 100 : 100;
   const sAvg = sSum.possible > 0 ? (sSum.earned / sSum.possible) * 100 : 100;
 
+  // Weighted: 30% Formative, 70% Summative
   return (fAvg * 0.3) + (sAvg * 0.7);
 }
 
-function getBasePoints(grade: number): number {
+function getBaseGPA(grade: number): number {
   for (const [min, max, pts] of GPA_SCALE) {
     if (grade >= min && grade <= max) return pts;
   }
   return 0;
 }
 
-function calcGPAForClass(cls: ClassData): number {
-  const grade = getClassGradePercent(cls.formative, cls.summative);
-  const base = getBasePoints(grade);
+function getClassGPA(cls: ClassData): number {
+  const percent = getClassPercent(cls.formative, cls.summative);
+  const base = getBaseGPA(percent);
+  // L1 = +2.0 (Max 6.0), L2 = +1.0 (Max 5.0)
   const weight = cls.level === 'L1' ? 2.0 : 1.0;
   return base + weight;
 }
 
 function calculateCumulativeGPA(classes: ClassData[]): number {
-  let totalPoints = FOUNDATION.gpa * FOUNDATION.credits;
-  let totalCredits = FOUNDATION.credits;
-
+  const bankedPoints = BANKED.gpa * BANKED.credits;
+  let currentPoints = 0;
+  
   classes.forEach(cls => {
-    totalPoints += calcGPAForClass(cls);
-    totalCredits += 1;
+    currentPoints += getClassGPA(cls);
   });
 
-  return totalPoints / totalCredits;
+  const totalCredits = BANKED.credits + classes.length;
+  return (bankedPoints + currentPoints) / totalCredits;
 }
 
-function calcDrain(cls: ClassData, allClasses: ClassData[]): number {
-  // Calculate current GPA
-  const currentGPA = calculateCumulativeGPA(allClasses);
-  
-  // Calculate GPA if this class was perfect (100% = 6.0 for L1)
-  const tempClasses = allClasses.map(c => {
-    if (c.id === cls.id) {
-      // Create a perfect clone
-      return { 
-        ...c, 
-        formative: [{earned: 100, possible: 100}], 
-        summative: [{earned: 100, possible: 100}] 
-      };
-    }
-    return c;
-  });
-  
-  const perfectGPA = calculateCumulativeGPA(tempClasses);
-  return perfectGPA - currentGPA;
-}
-
-function calcStrikes(cls: ClassData): number {
-  const fSum = sumGrades(cls.formative);
-  const sSum = sumGrades(cls.summative);
-  
-  const currentGrade = getClassGradePercent(cls.formative, cls.summative);
-  if (currentGrade >= 90) return 0;
-
-  const target = 90;
-  // How many points needed to reach 90%?
-  // (CurrentPoints + (100 * N)) / (CurrentPossible + (100 * N)) = 0.90
-  // Simplified heuristic: assume next assignments are Summative (heavier weight)
-  // This is a rough approximation for "Reclamation Strikes".
-  
-  // Let's use the deficit approach.
-  // Deficit from 90:
-  const deficit = target - currentGrade; // e.g. 90 - 61 = 29
-  
-  // Each Summative 100 pulls the grade up.
-  // If we have few summatives, one 100 swings it a lot.
-  // If we have many, it swings less.
-  // Approximation: each 100 on a major assignment swings average by ~2-5% typically.
-  // Let's assume a "Strike" = a 100 on a standard 100pt assignment.
-  // Using calculus: d(Grade)/d(Points) = ...
-  // Let's simplify: We need to cover the deficit.
-  // Each 100 in summative contributes ~70 points to the "weighted average".
-  // So strikes = deficit / (avg_impact_per_100). Let's say impact is 2.5% per assignment.
-  return Math.ceil(deficit / 2.5); 
-}
-
-function calcIntercept(gpa: number): string {
-  // Required GPA for remaining credits to hit 5.75
-  const currentCredits = FOUNDATION.credits + 7; // Assuming all 7 classes are active
-  // Actually, let's assume we are calculating for the "Rest of High School" or just "Remaining classes"
-  // Let's display "Required Average for 5.75" based on a theoretical perfect semester.
-  
-  // Let's show: "REQ_AVG: 5.8" (meaning you need 5.8 semesters to balance out)
-  // Simpler: Remaining Points Needed.
-  const targetPoints = TARGET_GPA * TOTAL_CREDITS_GOAL;
-  const currentPoints = (gpa * (FOUNDATION.credits + 7)); // Approx current points
-  
-  if (gpa >= TARGET_GPA) return "LOCKED";
-  
-  const deficit = targetPoints - currentPoints;
-  // If deficit is positive, you need to average this GPA on future credits.
-  // But since we are mid-semester, this is just "Pressure".
-  
-  // Let's return the "Required Future Perf"
-  // If GPA is 5.2, and target is 5.75, the gap is 0.55.
-  // To close gap, you need > 5.75.
-  const reqFuture = TARGET_GPA + (TARGET_GPA - gpa);
-  
-  if (reqFuture > 6.0) return "IMPOSSIBLE";
-  return `REQ_SEM: ${reqFuture.toFixed(2)}`;
+function calcDrain(cls: ClassData): number {
+  const currentClassGPA = getClassGPA(cls);
+  // Drain = Target Velocity - Current Performance
+  // If negative, you are gaining ground. If positive, you are losing ground.
+  // Wait, user wants "Drain" as "How much is this hurting me?"
+  // If I have a 5.0 in Band, and I need 5.79, the drain is (5.79 - 5.0) = 0.79 deficit?
+  // Or better: How much is this pulling down the average?
+  // Let's show: REQUIRED - CURRENT.
+  const deficit = REQUIRED_VELOCITY - currentClassGPA;
+  return deficit > 0 ? deficit : 0;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -196,14 +121,14 @@ function calcIntercept(gpa: number): string {
 export default function ThreatEngine() {
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [cmd, setCmd] = useState('');
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logs, setLogs] = useState<{type: string, msg: string}[]>([]);
   const [expanded, setExpanded] = useState<SubjectID | null>(null);
   const [simGpa, setSimGpa] = useState<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // INIT
   useEffect(() => {
-    const stored = localStorage.getItem('bluelock_threat_v4');
+    const stored = localStorage.getItem('virtue_os_v5');
     if (stored) setClasses(JSON.parse(stored));
     else {
       const defaults: ClassData[] = Object.values(SUBJECT_MAP).map(s => ({
@@ -211,200 +136,198 @@ export default function ThreatEngine() {
       }));
       setClasses(defaults);
     }
-    addLog('info', 'SYSTEM ONLINE. POINT-BASED ARCHITECTURE.');
+    addLog('info', 'VIRTUE.OS [5.1] ONLINE.');
+    addLog('info', `TARGET_VELOCITY: ${REQUIRED_VELOCITY.toFixed(3)}`);
   }, []);
 
   // SAVE
   useEffect(() => {
-    if (classes.length > 0) localStorage.setItem('bluelock_threat_v4', JSON.stringify(classes));
+    if (classes.length > 0) localStorage.setItem('virtue_os_v5', JSON.stringify(classes));
   }, [classes]);
 
   // FOCUS
   useEffect(() => {
-    window.addEventListener('keydown', () => inputRef.current?.focus());
+    const handleKey = () => inputRef.current?.focus();
+    window.addEventListener('keypress', handleKey);
+    return () => window.removeEventListener('keypress', handleKey);
   }, []);
 
-  const addLog = (type: LogEntry['type'], msg: string) => setLogs(prev => [...prev.slice(-4), { type, message: msg }]);
+  const addLog = (type: string, msg: string) => setLogs(prev => [...prev.slice(-4), { type, msg }]);
 
-  // PARSER
-  const handleCommand = (raw: string) => {
+  // HANDLER
+  const handleCmd = (raw: string) => {
     setSimGpa(null);
-    const commands = raw.split(';').map(c => c.trim());
-    let tempClasses = [...classes];
-    let simulation = false;
+    const chain = raw.split(';').map(c => c.trim());
+    let tempData = [...classes];
+    let simMode = false;
 
-    for (const c of commands) {
-      if (!c) continue;
+    chain.forEach(c => {
+      if (!c) return;
       if (c.startsWith('?')) {
-        simulation = true;
-        const subCmd = c.substring(1).trim();
-        processInput(subCmd, tempClasses, true);
+        simMode = true;
+        processCmd(c.substring(1), tempData, true);
       } else {
-        processInput(c, tempClasses, false);
+        processCmd(c, tempData, false);
       }
-    }
-    
-    if (!simulation) setClasses(tempClasses);
+    });
+
+    if (!simMode) setClasses(tempData);
   };
 
-  const processInput = (input: string, data: ClassData[], isSim: boolean) => {
-    // ADD COMMAND
+  const processCmd = (input: string, data: ClassData[], sim: boolean) => {
+    // PURGE
+    if (input.startsWith('purge')) {
+      const key = input.split(' ')[1];
+      const target = SUBJECT_MAP[key];
+      if (target) {
+        const idx = data.findIndex(c => c.id === target.id);
+        data[idx].formative = [];
+        data[idx].summative = [];
+        addLog('warn', `PURGED: ${target.name}`);
+      } else addLog('err', 'ERR: UNKNOWN TARGET');
+      return;
+    }
+
+    // ADD
     if (input.startsWith('+')) {
       const parts = input.split(' ');
       const key = parts[0].substring(1);
       const type = parts[1]; // q or t
-      
-      // Parse numbers: +m q 100 90 80
-      // We map them to {earned, possible}. 
-      // Standard input is just "Earned". We assume "Possible" is 100.
-      const gradesRaw = parts.slice(2).map(g => parseInt(g)).filter(g => !isNaN(g));
-      
+      const grades = parts.slice(2).map(g => parseInt(g)).filter(g => !isNaN(g));
+
       const target = SUBJECT_MAP[key];
-      if (!target || !type || gradesRaw.length === 0) {
-        addLog('error', 'ERR: SYNTAX. +[sub] [q/t] [grades...]');
+      if (!target || !type || grades.length === 0) {
+        addLog('err', 'ERR: SYNTAX');
         return;
       }
 
-      const idx = data.findIndex(cls => cls.id === target.id);
-      if (idx === -1) return;
-
+      const idx = data.findIndex(c => c.id === target.id);
       const arrKey = type === 't' ? 'summative' : 'formative';
       
-      // Convert raw numbers to GradeEntry objects
-      const newEntries: GradeEntry[] = gradesRaw.map(g => ({ earned: g, possible: 100 }));
-      
-      data[idx][arrKey].push(...newEntries);
-      
-      if (isSim) {
-        const newGpa = calculateCumulativeGPA(data);
-        setSimGpa(newGpa);
-        addLog('sim', `SIM: +${gradesRaw.length} to ${target.name} -> GPA ${newGpa.toFixed(3)}`);
+      // Map to { earned, possible }
+      const entries = grades.map(g => ({ earned: g, possible: 100 }));
+      data[idx][arrKey].push(...entries);
+
+      if (sim) {
+        const gpa = calculateCumulativeGPA(data);
+        setSimGpa(gpa);
+        addLog('sim', `SIM: GPA ${gpa.toFixed(3)}`);
       } else {
-        addLog('success', `LOGGED: ${target.name} [${newEntries.length} entries]`);
-        const breaches = gradesRaw.filter(g => g < 90);
-        if (breaches.length > 0) addLog('breach', `ANCHOR DETECTED: ${breaches.length} low scores`);
+        addLog('ok', `LOGGED: ${target.name} [${entries.length}]`);
+        if (grades.some(g => g < 70)) addLog('breach', 'SYSTEM BREACH: LOW SCORE');
       }
     }
     else if (input === 'status') {
-      const critical = data.filter(c => getClassGradePercent(c.formative, c.summative) < 90);
-      addLog('info', `CRITICAL ANCHORS: ${critical.length}`);
+      const anchors = data.filter(c => getClassGPA(c) < REQUIRED_VELOCITY).length;
+      addLog('info', `ANCHORS DETECTED: ${anchors}`);
     }
-    else if (input === 'exit') window.location.href = '/';
     else if (input === 'reset') {
-      if (confirm('RESET DATABASE?')) {
-        localStorage.removeItem('bluelock_threat_v4');
+      if (confirm('WIPE DATABASE?')) {
+        localStorage.removeItem('virtue_os_v5');
         window.location.reload();
       }
     }
-    else {
-      addLog('error', `UNKNOWN: ${input}`);
-    }
+    else if (input === 'exit') window.location.href = '/';
   };
 
-  // EDITOR
+  // DELETE
   const deleteGrade = (id: SubjectID, type: 'formative' | 'summative', idx: number) => {
     setClasses(prev => {
-      const newClasses = [...prev];
-      newClasses.find(c => c.id === id)![type].splice(idx, 1);
-      return newClasses;
+      const n = [...prev];
+      n.find(c => c.id === id)![type].splice(idx, 1);
+      return n;
     });
-    addLog('info', 'RECORD PURGED.');
   };
 
   // CALCULATIONS
   const gpa = calculateCumulativeGPA(classes);
-  const intercept = calcIntercept(gpa);
+  const debt = REQUIRED_TOTAL_POINTS - (BANKED.gpa * BANKED.credits + classes.reduce((s, c) => s + getClassGPA(c), 0));
   
-  // Sort by Grade (Lowest first = Highest Priority)
-  const sortedClasses = [...classes].sort((a, b) => 
-    getClassGradePercent(a.formative, a.summative) - getClassGradePercent(b.formative, b.summative)
-  );
+  // SORT: Lowest GPA First (Anchors at top)
+  const sortedClasses = [...classes].sort((a, b) => getClassGPA(a) - getClassGPA(b));
 
   return (
     <main style={styles.main}>
-      {/* HUD */}
+      {/* HEADER HUD */}
       <header style={styles.hud}>
-        <div style={styles.hudTop}>
-          <div style={styles.statBlock}>
+        <div style={styles.rowTop}>
+          <div style={styles.col}>
             <span style={styles.label}>CUMULATIVE GPA</span>
-            <span style={{ ...styles.value, color: gpa >= 5.75 ? '#00FF41' : '#FFB000' }}>
+            <span style={{ ...styles.val, color: (simGpa || gpa) >= 5.75 ? '#00FF41' : '#FFB000', fontSize: '1.8rem' }}>
               {(simGpa || gpa).toFixed(3)}
             </span>
           </div>
-          <div style={styles.statBlock}>
-            <span style={styles.label}>5.75 INTERCEPT</span>
-            <span style={styles.subValue}>{intercept}</span>
+          <div style={styles.col}>
+            <span style={styles.label}>REQUIRED VELOCITY</span>
+            <span style={{ ...styles.val, color: '#FFF' }}>{REQUIRED_VELOCITY.toFixed(3)}</span>
           </div>
         </div>
-        <div style={styles.hudBottom}>
+        <div style={styles.hudBot}>
           <div style={styles.bank}>
             <span style={styles.bankLabel}>BANK</span>
-            <span style={styles.bankVal}>GEO_95 [5.5]</span>
+            <span style={styles.bankVal}>GEO: 5.5</span>
           </div>
-          <div style={styles.statusLight}>
-            {gpa >= 5.5 ? 'NOMINAL' : 'DEGRADED'}
+          <div style={styles.debt}>
+            <span>DEBT: </span>
+            <span style={{ color: debt > 0 ? '#FFB000' : '#00FF41' }}>
+              {debt.toFixed(2)} PTS
+            </span>
           </div>
         </div>
       </header>
 
       {/* LIST */}
-      <div style={styles.listContainer}>
+      <div style={styles.list}>
         {sortedClasses.map(cls => {
-          const avg = getClassGradePercent(cls.formative, cls.summative);
-          const drain = calcDrain(cls, classes);
-          const strikes = calcStrikes(cls);
-          const isCritical = avg < 90;
+          const cGpa = getClassGPA(cls);
+          const percent = getClassPercent(cls.formative, cls.summative);
+          const drain = calcDrain(cls);
+          const isAnchor = cGpa < REQUIRED_VELOCITY;
           const isExpanded = expanded === cls.id;
 
           return (
-            <div key={cls.id} onClick={() => setExpanded(isExpanded ? null : cls.id)} style={styles.rowWrapper}>
-              <div style={styles.row}>
+            <div key={cls.id} onClick={() => setExpanded(isExpanded ? null : cls.id)} style={styles.cardWrapper}>
+              <div style={styles.card}>
                 <div style={{ flex: 1 }}>
-                  <div style={styles.rowTop}>
-                    <span style={styles.levelBadge}>L1</span>
-                    <span style={{ ...styles.rowName, color: isCritical ? '#FF1744' : '#FFF' }}>{cls.name}</span>
-                  </div>
+                  <span style={{ ...styles.badge, borderColor: cls.level === 'L1' ? '#FFF' : '#888', color: cls.level === 'L1' ? '#FFF' : '#888' }}>
+                    {cls.level}
+                  </span>
+                  <span style={{ ...styles.name, color: isAnchor ? '#FFB000' : '#FFF' }}>{cls.name}</span>
                 </div>
-                <div style={styles.rowData}>
-                  <div style={styles.avgBlock}>
-                    <span style={styles.avgNum}>{avg.toFixed(1)}</span>
-                    <span style={styles.avgSuffix}>%</span>
-                  </div>
+                <div style={styles.data}>
+                  <span style={styles.grade}>{percent.toFixed(1)}%</span>
                   <div style={styles.drainBox}>
-                    <span style={styles.drainLabel}>DRAIN</span>
-                    <span style={{ ...styles.drainVal, color: drain > 0.1 ? '#FF1744' : '#666' }}>
-                      -{drain.toFixed(3)}
-                    </span>
-                  </div>
-                  <div style={styles.strikeBox}>
-                    <span style={styles.strikeLabel}>STRK</span>
-                    <span style={{ ...styles.strikeVal, color: strikes > 0 ? '#FFB000' : '#00FF41' }}>
-                      {strikes}
+                    <span style={styles.drainLabel}>GPA</span>
+                    <span style={{ ...styles.drainVal, color: cGpa >= REQUIRED_VELOCITY ? '#00FF41' : '#FF1744' }}>
+                      {cGpa.toFixed(2)}
                     </span>
                   </div>
                 </div>
               </div>
-              
-              {/* EXPANDED */}
+              {/* EXPAND */}
               {isExpanded && (
-                <div style={styles.expanded}>
-                  <div style={styles.expHeader}>FORMATIVE [{cls.formative.length}]</div>
-                  <div style={styles.gradeList}>
-                    {cls.formative.map((g, i) => (
-                      <div key={i} style={styles.gradeItem}>
-                        <span>{g.earned}/{g.possible}</span>
-                        <button onClick={(e) => { e.stopPropagation(); deleteGrade(cls.id, 'formative', i); }} style={styles.delBtn}>X</button>
-                      </div>
-                    ))}
+                <div style={styles.exp}>
+                  <div style={styles.expSec}>
+                    FORM [{cls.formative.length}]
+                    <div style={styles.gList}>
+                      {cls.formative.map((g, i) => (
+                        <div key={i} style={styles.gItem}>
+                          {g.earned}/{g.possible}
+                          <button onClick={(e) => { e.stopPropagation(); deleteGrade(cls.id, 'formative', i); }} style={styles.xBtn}>X</button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div style={styles.expHeader}>SUMMATIVE [{cls.summative.length}]</div>
-                  <div style={styles.gradeList}>
-                    {cls.summative.map((g, i) => (
-                      <div key={i} style={styles.gradeItem}>
-                        <span>{g.earned}/{g.possible}</span>
-                        <button onClick={(e) => { e.stopPropagation(); deleteGrade(cls.id, 'summative', i); }} style={styles.delBtn}>X</button>
-                      </div>
-                    ))}
+                  <div style={styles.expSec}>
+                    SUMM [{cls.summative.length}]
+                    <div style={styles.gList}>
+                      {cls.summative.map((g, i) => (
+                        <div key={i} style={styles.gItem}>
+                          {g.earned}/{g.possible}
+                          <button onClick={(e) => { e.stopPropagation(); deleteGrade(cls.id, 'summative', i); }} style={styles.xBtn}>X</button>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -413,24 +336,23 @@ export default function ThreatEngine() {
         })}
       </div>
 
-      {/* LOGS */}
-      <div style={styles.logArea}>
+      {/* LOG */}
+      <div style={styles.log}>
         {logs.map((l, i) => (
-          <div key={i} style={{ color: l.type === 'breach' ? '#FF1744' : l.type === 'sim' ? '#00FF41' : '#666' }}>
-            {`> ${l.message}`}
+          <div key={i} style={{ color: l.type === 'breach' ? '#FF1744' : l.type === 'sim' ? '#00FF41' : l.type === 'err' ? '#FFF' : '#666' }}>
+            {`> ${l.msg}`}
           </div>
         ))}
       </div>
 
-      {/* CLI */}
+      {/* INPUT */}
       <footer style={styles.footer}>
-        <span style={styles.prompt}>{'>'}</span>
+        <span style={styles.prompt}>{`>`}</span>
         <input
           ref={inputRef}
           value={cmd}
           onChange={e => setCmd(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') { handleCommand(cmd); setCmd(''); }}}
-          placeholder="CMD (+m q 100)"
+          onKeyDown={e => { if (e.key === 'Enter') { handleCmd(cmd); setCmd(''); }}}
           style={styles.input}
         />
       </footer>
@@ -439,58 +361,48 @@ export default function ThreatEngine() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// STYLES (Ghost UI / Static HUD)
+// STYLES
 // ═══════════════════════════════════════════════════════════════
 
 const styles: { [key: string]: React.CSSProperties } = {
   main: { height: '100vh', background: '#000', color: '#FFF', fontFamily: 'monospace', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   
   // HUD
-  hud: { borderBottom: '2px solid #222', padding: '15px', background: '#050505', flexShrink: 0 },
-  hudTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '10px' },
-  statBlock: { display: 'flex', flexDirection: 'column' },
-  label: { fontSize: '0.7rem', color: '#666', letterSpacing: '1px' },
-  value: { fontSize: '2rem', fontWeight: 'bold', lineHeight: 1 },
-  subValue: { fontSize: '0.9rem', color: '#00FF41', fontFamily: 'monospace' },
+  hud: { borderBottom: '2px solid #333', padding: '15px', background: '#0a0a0a' },
+  rowTop: { display: 'flex', justifyContent: 'space-between', marginBottom: '10px' },
+  col: { display: 'flex', flexDirection: 'column' },
+  label: { fontSize: '0.6rem', color: '#666', letterSpacing: '1px', marginBottom: '2px' },
+  val: { fontSize: '1.2rem', fontWeight: 'bold' },
   
-  hudBottom: { display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #222', paddingTop: '10px' },
-  bank: { display: 'flex', gap: '10px', alignItems: 'center' },
-  bankLabel: { fontSize: '0.6rem', border: '1px solid #333', padding: '2px 5px', color: '#666' },
-  bankVal: { color: '#00FF41', fontSize: '0.8rem' },
-  statusLight: { fontSize: '0.7rem', color: '#FFB000', letterSpacing: '2px' },
+  hudBot: { display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #222', paddingTop: '5px', fontSize: '0.7rem' },
+  bank: { display: 'flex', gap: '5px', color: '#666' },
+  bankLabel: { border: '1px solid #333', padding: '0 3px', fontSize: '0.6rem' },
+  bankVal: { color: '#00FF41' },
+  debt: { color: '#666' },
 
   // LIST
-  listContainer: { flex: 1, overflowY: 'auto', scrollbarWidth: 'none' }, // Hide scrollbar
+  list: { flex: 1, overflowY: 'auto' },
   
-  rowWrapper: { borderBottom: '1px solid #111' },
-  row: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 15px', cursor: 'pointer' },
-  rowTop: { display: 'flex', alignItems: 'center', gap: '8px' },
-  levelBadge: { fontSize: '0.5rem', border: '1px solid #00FF41', color: '#00FF41', padding: '1px 3px' },
-  rowName: { fontSize: '0.9rem', fontWeight: 'bold' },
-  
-  rowData: { display: 'flex', alignItems: 'center', gap: '10px' },
-  avgBlock: { display: 'flex', alignItems: 'baseline' },
-  avgNum: { fontSize: '1.2rem', fontWeight: 'bold' },
-  avgSuffix: { fontSize: '0.7rem', color: '#666', marginLeft: '2px' },
-  
-  drainBox: { textAlign: 'center', width: '60px' },
+  cardWrapper: { borderBottom: '1px solid #111' },
+  card: { padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
+  badge: { fontSize: '0.5rem', border: '1px solid', padding: '1px 3px', marginRight: '8px' },
+  name: { fontSize: '0.9rem' },
+  data: { display: 'flex', alignItems: 'center', gap: '15px' },
+  grade: { fontSize: '0.9rem', opacity: 0.7 },
+  drainBox: { textAlign: 'right' },
   drainLabel: { display: 'block', fontSize: '0.5rem', color: '#666' },
-  drainVal: { fontSize: '0.8rem' },
-  
-  strikeBox: { textAlign: 'center', width: '40px' },
-  strikeLabel: { display: 'block', fontSize: '0.5rem', color: '#666' },
-  strikeVal: { fontSize: '1rem', fontWeight: 'bold' },
+  drainVal: { fontWeight: 'bold' },
 
-  // EXPANDED
-  expanded: { background: '#0A0A0A', padding: '10px 20px 20px', borderBottom: '1px solid #222' },
-  expHeader: { fontSize: '0.7rem', color: '#00FF41', marginTop: '10px', opacity: 0.5 },
-  gradeList: { display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' },
-  gradeItem: { background: '#111', padding: '2px 8px', border: '1px solid #333', fontSize: '0.8rem', display: 'flex', gap: '5px' },
-  delBtn: { background: 'none', border: 'none', color: '#FF1744', cursor: 'pointer', fontWeight: 'bold', padding: 0 },
+  // EXPAND
+  exp: { background: '#050505', padding: '10px 20px 15px', borderBottom: '1px solid #222' },
+  expSec: { marginTop: '10px', fontSize: '0.7rem', color: '#555' },
+  gList: { display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' },
+  gItem: { background: '#111', border: '1px solid #333', padding: '2px 6px', fontSize: '0.8rem', display: 'flex', gap: '4px' },
+  xBtn: { background: 'none', border: 'none', color: '#FF1744', cursor: 'pointer', fontSize: '0.7rem', padding: 0 },
 
   // FOOTER
-  logArea: { height: '40px', overflow: 'hidden', padding: '5px 15px', fontSize: '0.7rem', borderTop: '1px solid #222' },
-  footer: { display: 'flex', alignItems: 'center', padding: '10px', background: '#000', borderTop: '1px solid #333', flexShrink: 0 },
-  prompt: { color: '#00FF41', marginRight: '10px', fontWeight: 'bold' },
-  input: { background: 'transparent', border: 'none', color: '#FFF', flex: 1, outline: 'none', fontFamily: 'monospace' },
+  log: { height: '40px', fontSize: '0.7rem', padding: '5px 15px', overflow: 'hidden', borderTop: '1px solid #222' },
+  footer: { display: 'flex', alignItems: 'center', padding: '10px 15px', background: '#000', borderTop: '1px solid #333' },
+  prompt: { color: '#00FF41', marginRight: '10px' },
+  input: { background: 'transparent', border: 'none', color: '#FFF', flex: 1, outline: 'none', fontFamily: 'monospace', fontSize: '1rem' },
 };
