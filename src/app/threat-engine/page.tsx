@@ -1,17 +1,3 @@
-Understood. All classes are **L1 (Advanced)**. This maximizes your GPA potential (6.0 scale) across the board.
-
-**The Adjustment:**
-I have updated the `SUBJECT_MAP` to flag every single class as `L1`. This means every 100 you get is worth **6.0 points**, and your baseline for calculation is higher.
-
-**INSTRUCTIONS:**
-1.  Go to `src/app/threat-engine/page.tsx`.
-2.  **Delete everything**.
-3.  Paste the updated code below.
-4.  Commit.
-
-#### FILE: `src/app/threat-engine/page.tsx`
-
-```tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -371,4 +357,3 @@ const styles: { [key: string]: React.CSSProperties } = {
   prompt: { color: '#00FF41', marginRight: '10px', fontWeight: 'bold' },
   input: { background: 'transparent', border: 'none', color: '#FFF', flex: 1, outline: 'none', fontFamily: 'monospace' },
 };
-```
