@@ -18,7 +18,6 @@ interface ClassData {
   summative: GradeEntry[];
 }
 
-// KHS Scale
 const GPA_SCALE = [
   [97, 100, 4.0], [93, 96, 3.8], [90, 92, 3.6], 
   [87, 89, 3.4], [83, 86, 3.2], [80, 82, 3.0],
@@ -96,7 +95,6 @@ export default function ThreatEngine() {
   const [expanded, setExpanded] = useState<SubjectID | null>(null);
   const [simGpa, setSimGpa] = useState<number | null>(null);
   
-  // IMPORT STATE
   const [importMode, setImportMode] = useState(false);
   const [importData, setImportData] = useState({ subject: 'm', type: 'q', grades: '' });
 
@@ -112,7 +110,7 @@ export default function ThreatEngine() {
       }));
       setClasses(defaults);
     }
-    addLog('info', 'SYSTEM ONLINE. TYPE "import" TO SYNC DATA.');
+    addLog('info', 'SYSTEM ONLINE. TYPE "import" TO SYNC.');
   }, []);
 
   // SAVE
@@ -133,7 +131,6 @@ export default function ThreatEngine() {
   const handleCmd = (raw: string) => {
     setSimGpa(null);
     
-    // TOGGLE IMPORT MODE
     if (raw.toLowerCase() === 'import') {
       setImportMode(true);
       return;
@@ -201,7 +198,6 @@ export default function ThreatEngine() {
     }
   };
 
-  // IMPORT HANDLER
   const handleImport = () => {
     const { subject, type, grades } = importData;
     const parsed = grades.split(/[\s,]+/).map(g => parseInt(g)).filter(g => !isNaN(g));
@@ -228,13 +224,11 @@ export default function ThreatEngine() {
     setImportMode(false);
   };
 
-  // CALCULATIONS
   const gpa = calculateCumulativeGPA(classes);
   const sortedClasses = [...classes].sort((a, b) => getClassGPA(a) - getClassGPA(b));
 
   return (
     <main style={styles.main}>
-      {/* IMPORT OVERLAY */}
       {importMode && (
         <div style={styles.overlay}>
           <div style={styles.modal}>
@@ -266,7 +260,6 @@ export default function ThreatEngine() {
         </div>
       )}
 
-      {/* HEADER HUD */}
       <header style={styles.hud}>
         <div style={styles.rowTop}>
           <div style={styles.col}>
@@ -291,12 +284,10 @@ export default function ThreatEngine() {
         </div>
       </header>
 
-      {/* LIST */}
       <div style={styles.list}>
         {sortedClasses.map(cls => {
           const cGpa = getClassGPA(cls);
           const percent = getClassPercent(cls.formative, cls.summative);
-          const drain = calcDrain(cls);
           const isAnchor = cGpa < REQUIRED_VELOCITY;
           const isExpanded = expanded === cls.id;
 
@@ -319,7 +310,6 @@ export default function ThreatEngine() {
                   </div>
                 </div>
               </div>
-              {/* EXPAND */}
               {isExpanded && (
                 <div style={styles.exp}>
                   <div style={styles.expSec}>
@@ -363,7 +353,6 @@ export default function ThreatEngine() {
         })}
       </div>
 
-      {/* LOG */}
       <div style={styles.log}>
         {logs.map((l, i) => (
           <div key={i} style={{ color: l.type === 'breach' ? '#FF1744' : l.type === 'sim' ? '#00FF41' : l.type === 'err' ? '#FFF' : '#666' }}>
@@ -372,7 +361,6 @@ export default function ThreatEngine() {
         ))}
       </div>
 
-      {/* INPUT */}
       <footer style={styles.footer}>
         <span style={styles.prompt}>{`>`}</span>
         <input
@@ -387,26 +375,21 @@ export default function ThreatEngine() {
   );
 }
 
-// ═══════════════════════════════════════════════════════════════
-// STYLES
-// ═══════════════════════════════════════════════════════════════
-
 const styles: { [key: string]: React.CSSProperties } = {
   main: { height: '100vh', background: '#000', color: '#FFF', fontFamily: 'monospace', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   
-  // OVERLAY
+  // FIXED SYNTAX ERROR HERE
   overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.9)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modal: { width: '90%', maxWidth: '500px', background: '#111', border: '1px solid #00FF41', padding: '20px' },
   modalHeader: { fontSize: '0.8rem', color: '#00FF41', borderBottom: '1px solid #222', paddingBottom: '10px', marginBottom: '15px', letterSpacing: '2px' },
   modalBody: { display: 'flex', flexDirection: 'column', gap: '15px' },
   row: { display: 'flex', gap: '10px' },
-  select: { flex: 1, background: '#000', border: '1px solid '#333', color: '#FFF', padding: '8px', fontFamily: 'monospace' },
+  select: { flex: 1, background: '#000', border: '1px solid #333', color: '#FFF', padding: '8px', fontFamily: 'monospace' }, // FIXED QUOTE
   textarea: { width: '100%', height: '100px', background: '#000', border: '1px solid #333', color: '#FFF', padding: '10px', fontFamily: 'monospace', resize: 'none' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' },
   cancelBtn: { background: 'transparent', color: '#666', border: '1px solid #333', padding: '5px 15px', cursor: 'pointer' },
   injectBtn: { background: '#00FF41', color: '#000', border: 'none', padding: '5px 15px', fontWeight: 'bold', cursor: 'pointer' },
 
-  // HUD
   hud: { borderBottom: '2px solid #333', padding: '15px', background: '#050505' },
   rowTop: { display: 'flex', justifyContent: 'space-between', marginBottom: '10px' },
   col: { display: 'flex', flexDirection: 'column' },
@@ -418,7 +401,6 @@ const styles: { [key: string]: React.CSSProperties } = {
   bankVal: { color: '#00FF41' },
   statusLight: { color: '#FFB000', letterSpacing: '2px' },
 
-  // LIST
   list: { flex: 1, overflowY: 'auto' },
   cardWrapper: { borderBottom: '1px solid #111' },
   card: { padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
@@ -430,14 +412,12 @@ const styles: { [key: string]: React.CSSProperties } = {
   drainLabel: { display: 'block', fontSize: '0.5rem', color: '#666' },
   drainVal: { fontWeight: 'bold' },
 
-  // EXPAND
   exp: { background: '#0A0A0A', padding: '10px 20px 15px', borderBottom: '1px solid #222' },
   expSec: { marginTop: '10px', fontSize: '0.7rem', color: '#555' },
   gList: { display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' },
   gItem: { background: '#111', border: '1px solid #333', padding: '2px 6px', fontSize: '0.8rem', display: 'flex', gap: '4px' },
   xBtn: { background: 'none', border: 'none', color: '#FF1744', cursor: 'pointer', fontSize: '0.7rem', padding: 0 },
 
-  // FOOTER
   log: { height: '40px', fontSize: '0.7rem', padding: '5px 15px', overflow: 'hidden', borderTop: '1px solid #222' },
   footer: { display: 'flex', alignItems: 'center', padding: '10px 15px', background: '#000', borderTop: '1px solid #333' },
   prompt: { color: '#00FF41', marginRight: '10px' },
