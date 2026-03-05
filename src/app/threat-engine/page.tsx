@@ -1,21 +1,3 @@
-This is the **Total Point Refactor**. We are moving from "Average of Averages" to "Sum of Points," which is the only way to accurately track the "Algebra II Paradox" (700 points of dead weight).
-
-**New Features:**
-1.  **Point-Based Logic:** `{ earned: 95, possible: 100 }`.
-2.  **GPA Drain:** Shows exactly how much a class is dragging you down (e.g., `-0.142`).
-3.  **The Intercept:** Calculates the exact average you need on remaining credits to hit **5.75**.
-4.  **Shadow Mode:** `?sim` commands calculate "What-If" scenarios without saving.
-5.  **Reclamation Strikes:** Exact count of 100s needed to hit 90%.
-
-**INSTRUCTIONS:**
-1.  Go to `src/app/threat-engine/page.tsx`.
-2.  **Delete everything**.
-3.  Paste the code below.
-4.  Commit.
-
-#### FILE: `src/app/threat-engine/page.tsx`
-
-```tsx
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
@@ -512,4 +494,3 @@ const styles: { [key: string]: React.CSSProperties } = {
   prompt: { color: '#00FF41', marginRight: '10px', fontWeight: 'bold' },
   input: { background: 'transparent', border: 'none', color: '#FFF', flex: 1, outline: 'none', fontFamily: 'monospace' },
 };
-```
