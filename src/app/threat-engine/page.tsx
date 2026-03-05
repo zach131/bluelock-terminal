@@ -1,12 +1,96 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 
 // ═══════════════════════════════════════════════════════════════
-// THREAT ENGINE (Academics)
+// TYPES
+// ═══════════════════════════════════════════════════════════════
+
+interface Threat {
+  id: string;
+  name: string;
+  subject: string;
+  dueDate: string;
+  status: 'ACTIVE' | 'NEUTRALIZED';
+  level: 'S' | 'A' | 'B' | 'C';
+}
+
+// ═══════════════════════════════════════════════════════════════
+// UTILITY FUNCTIONS
+// ═══════════════════════════════════════════════════════════════
+
+function calculateThreatLevel(dueDate: string): 'S' | 'A' | 'B' | 'C' {
+  const now = new Date();
+  const due = new Date(dueDate);
+  const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  if (diffDays <= 1) return 'S'; // Critical
+  if (diffDays <= 3) return 'A'; // High
+  if (diffDays <= 7) return 'B'; // Medium
+  return 'C'; // Low
+}
+
+function getThreatColor(level: 'S' | 'A' | 'B' | 'C'): string {
+  switch (level) {
+    case 'S': return '#FF1744'; // Red
+    case 'A': return '#FF9100'; // Orange
+    case 'B': return '#FFEA00'; // Yellow
+    case 'C': return '#00E676'; // Green
+    default: return '#FFF';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════
 
 export default function ThreatEngine() {
+  const [threats, setThreats] = useState<Threat[]>([]);
+  const [name, setName] = useState('');
+  const [subject, setSubject] = useState('');
+  const [dueDate, setDueDate] = useState('');
+  const [loaded, setLoaded] = useState(false);
+
+  // Load
+  useEffect(() => {
+    const stored = localStorage.getItem('bluelock_threats');
+    if (stored) setThreats(JSON.parse(stored));
+    setLoaded(true);
+  }, []);
+
+  // Save
+  useEffect(() => {
+    if (loaded) localStorage.setItem('bluelock_threats', JSON.stringify(threats));
+  }, [threats, loaded]);
+
+  const handleAddThreat = () => {
+    if (!name || !dueDate) return;
+
+    const newThreat: Threat = {
+      id: Date.now().toString(),
+      name,
+      subject,
+      dueDate,
+      status: 'ACTIVE',
+      level: calculateThreatLevel(dueDate),
+    };
+
+    setThreats(prev => [...prev, newThreat].sort((a, b) => {
+      // Sort by Level priority
+      const order = { S: 0, A: 1, B: 2, C: 3 };
+      return order[a.level] - order[b.level];
+    }));
+    
+    setName('');
+    setSubject('');
+    setDueDate('');
+  };
+
+  const handleNeutralize = (id: string) => {
+    setThreats(prev => prev.filter(t => t.id !== id));
+  };
+
   return (
     <main style={styles.main}>
       <header style={styles.header}>
@@ -15,15 +99,69 @@ export default function ThreatEngine() {
       </header>
 
       <div style={styles.content}>
-        <div style={styles.card}>
-          <div style={styles.statusAlert}>SYSTEM ONLINE</div>
-          <p style={styles.text}>
-            This module will track academic threats (assignments) and neutralize them.
-          </p>
-          <div style={styles.placeholderBox}>
-            <span style={styles.placeholderText}>RADAR CHART / ASSIGNMENT LIST</span>
+        
+        {/* INPUT FORM */}
+        <section style={styles.section}>
+          <div style={styles.card}>
+            <div style={styles.inputLabel}>IDENTIFY THREAT</div>
+            <input
+              type="text"
+              placeholder="Assignment Name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              style={styles.input}
+            />
+            <input
+              type="text"
+              placeholder="Subject (Optional)"
+              value={subject}
+              onChange={(e) => setSubject(e.target.value)}
+              style={styles.input}
+            />
+            <input
+              type="date"
+              value={dueDate}
+              onChange={(e) => setDueDate(e.target.value)}
+              style={styles.input}
+            />
+            <button onClick={handleAddThreat} style={styles.addButton}>
+              LOG THREAT
+            </button>
           </div>
-        </div>
+        </section>
+
+        {/* ACTIVE THREATS */}
+        <section style={styles.section}>
+          <div style={styles.statusHeader}>
+            <span>ACTIVE THREATS</span>
+            <span style={styles.count}>{threats.length}</span>
+          </div>
+          
+          {loaded && threats.length === 0 && (
+            <div style={styles.emptyState}>NO THREATS DETECTED.</div>
+          )}
+
+          <div style={styles.threatList}>
+            {threats.map((threat) => (
+              <div key={threat.id} style={{ ...styles.threatCard, borderLeftColor: getThreatColor(threat.level) }}>
+                <div style={styles.threatTop}>
+                  <span style={styles.threatName}>{threat.name}</span>
+                  <span style={{ ...styles.levelBadge, color: getThreatColor(threat.level) }}>
+                    {threat.level}-CLASS
+                  </span>
+                </div>
+                <div style={styles.threatMeta}>
+                  {threat.subject && <span>{threat.subject} | </span>}
+                  <span>DUE: {new Date(threat.dueDate).toLocaleDateString()}</span>
+                </div>
+                <button onClick={() => handleNeutralize(threat.id)} style={styles.neutralizeBtn}>
+                  NEUTRALIZE
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+
       </div>
 
       <footer style={styles.footer}>
@@ -36,7 +174,7 @@ export default function ThreatEngine() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// STYLES (Local to this Core)
+// STYLES
 // ═══════════════════════════════════════════════════════════════
 
 const styles: { [key: string]: React.CSSProperties } = {
@@ -51,7 +189,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   header: {
     padding: '1rem',
     textAlign: 'center',
-    borderBottom: '1px solid #FF1744', // Red for Threat
+    borderBottom: '1px solid #FF1744',
     backgroundColor: '#0A0A0A',
   },
   headerTitle: {
@@ -74,38 +212,105 @@ const styles: { [key: string]: React.CSSProperties } = {
     width: '100%',
     boxSizing: 'border-box',
   },
+  section: {
+    marginBottom: '1.5rem',
+  },
   card: {
     backgroundColor: '#111',
     border: '1px solid #333',
-    padding: '1.5rem',
+    padding: '1rem',
     display: 'flex',
     flexDirection: 'column',
-    gap: '1rem',
-    textAlign: 'center',
+    gap: '0.75rem',
   },
-  statusAlert: {
-    color: '#00FF7F',
+  inputLabel: {
     fontSize: '0.8rem',
-    letterSpacing: '0.2em',
-    marginBottom: '1rem',
+    fontWeight: 'bold',
+    color: '#00F0FF',
+    letterSpacing: '0.1em',
+    marginBottom: '0.5rem',
   },
-  text: {
-    color: '#AAA',
+  input: {
+    backgroundColor: '#0A0A0A',
+    border: '1px solid #333',
+    color: '#FFF',
+    padding: '0.75rem',
     fontSize: '0.9rem',
-    lineHeight: 1.6,
+    fontFamily: 'inherit',
+    outline: 'none',
   },
-  placeholderBox: {
-    marginTop: '1rem',
-    height: '200px',
-    border: '1px dashed #333',
+  addButton: {
+    backgroundColor: '#FF1744',
+    color: '#FFF',
+    border: 'none',
+    padding: '0.75rem',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    letterSpacing: '0.1em',
+  },
+  statusHeader: {
     display: 'flex',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#0F0F0F',
-  },
-  placeholderText: {
-    color: '#444',
+    marginBottom: '0.5rem',
     fontSize: '0.8rem',
+    color: '#AAA',
+  },
+  count: {
+    backgroundColor: '#FF1744',
+    color: '#FFF',
+    padding: '0.1rem 0.5rem',
+    fontSize: '0.7rem',
+  },
+  emptyState: {
+    textAlign: 'center',
+    color: '#444',
+    padding: '2rem',
+    border: '1px dashed #333',
+    fontSize: '0.8rem',
+  },
+  threatList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
+  },
+  threatCard: {
+    backgroundColor: '#111',
+    border: '1px solid #333',
+    borderLeft: '4px solid', // Color set inline
+    padding: '1rem',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '0.5rem',
+  },
+  threatTop: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  threatName: {
+    fontWeight: 'bold',
+    fontSize: '1rem',
+  },
+  levelBadge: {
+    fontSize: '0.7rem',
+    fontWeight: 'bold',
+    padding: '0.2rem 0.4rem',
+    border: '1px solid currentColor',
+  },
+  threatMeta: {
+    fontSize: '0.75rem',
+    color: '#888',
+  },
+  neutralizeBtn: {
+    alignSelf: 'flex-end',
+    backgroundColor: 'transparent',
+    color: '#00FF7F',
+    border: '1px solid #00FF7F',
+    padding: '0.4rem 0.8rem',
+    fontSize: '0.7rem',
+    cursor: 'pointer',
+    marginTop: '0.5rem',
   },
   footer: {
     textAlign: 'center',
