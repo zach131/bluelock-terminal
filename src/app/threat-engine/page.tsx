@@ -1,22 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-
-// ═══════════════════════════════════════════════════════════════
-// TYPES & CONSTANTS
-// ═══════════════════════════════════════════════════════════════
+import { useState, useEffect, useRef, useCallback } from 'react';
 
 type SubjectID = 'alg' | 'csp' | 'aphu' | 'bio' | 'eng' | 'spa' | 'band';
 interface GradeEntry { earned: number; possible: number; }
 interface SemesterData { q1: GradeEntry[]; q2: GradeEntry[]; q3: GradeEntry[]; }
 interface ClassData { id: SubjectID; name: string; level: 'L1' | 'L2'; sem1: SemesterData; sem2: SemesterData; }
+interface ThreatData { classes: ClassData[]; rank: { current: number; total: number }; }
 
-const RANK_INFO = { current: 76, total: 736 };
-
-function calculateGPAValue(grade: number, level: 'L1' | 'L2'): number {
-  if (level === 'L1') return (grade - 40) / 10;
-  return (grade - 50) / 10;
-}
+const SYNC_KEY = 'bluelock_threat_engine';
 
 const SUBJECT_MAP: { [key: string]: { name: string; id: SubjectID; level: 'L1' | 'L2' } } = {
   'm': { name: 'Algebra II', id: 'alg', level: 'L1' },
@@ -28,9 +20,9 @@ const SUBJECT_MAP: { [key: string]: { name: string; id: SubjectID; level: 'L1' |
   'vb': { name: 'Varsity Band', id: 'band', level: 'L2' },
 };
 
-// ═══════════════════════════════════════════════════════════════
-// UTILS
-// ═══════════════════════════════════════════════════════════════
+function calculateGPAValue(grade: number, level: 'L1' | 'L2'): number {
+  return level === 'L1' ? (grade - 40) / 10 : (grade - 50) / 10;
+}
 
 function getAvg(arr: GradeEntry[]): number {
   if (arr.length === 0) return -1;
@@ -40,9 +32,7 @@ function getAvg(arr: GradeEntry[]): number {
 }
 
 function getSemesterAvg(sem: SemesterData): number {
-  const q1 = getAvg(sem.q1);
-  const q2 = getAvg(sem.q2);
-  const q3 = getAvg(sem.q3);
+  const q1 = getAvg(sem.q1), q2 = getAvg(sem.q2), q3 = getAvg(sem.q3);
   if (q1 !== -1 && q2 !== -1) return (q1 + q2) / 2;
   if (q1 !== -1) return q1;
   if (q2 !== -1) return q2;
@@ -51,93 +41,56 @@ function getSemesterAvg(sem: SemesterData): number {
 }
 
 function calculateCumulativeGPA(classes: ClassData[]): number {
-  let totalPoints = 5.5; // Geo
-  let totalCredits = 1.0;
+  let totalPoints = 5.5, totalCredits = 1.0;
   classes.forEach(cls => {
-    const s1Avg = getSemesterAvg(cls.sem1);
-    if (s1Avg !== -1) { totalPoints += calculateGPAValue(s1Avg, cls.level); totalCredits += 1.0; }
-    const s2Avg = getSemesterAvg(cls.sem2);
-    if (s2Avg !== -1) { totalPoints += calculateGPAValue(s2Avg, cls.level); totalCredits += 1.0; }
+    const s1 = getSemesterAvg(cls.sem1);
+    if (s1 !== -1) { totalPoints += calculateGPAValue(s1, cls.level); totalCredits += 1.0; }
+    const s2 = getSemesterAvg(cls.sem2);
+    if (s2 !== -1) { totalPoints += calculateGPAValue(s2, cls.level); totalCredits += 1.0; }
   });
   return totalCredits > 0 ? totalPoints / totalCredits : 0;
 }
 
-// ═══════════════════════════════════════════════════════════════
-// COMPONENT
-// ═══════════════════════════════════════════════════════════════
+function createDefaultClasses(): ClassData[] {
+  return Object.values(SUBJECT_MAP).map(s => ({ id: s.id, name: s.name, level: s.level, sem1: { q1: [], q2: [], q3: [] }, sem2: { q1: [], q2: [], q3: [] } }));
+}
 
 export default function ThreatEngine() {
-  const [classes, setClasses] = useState<ClassData[]>([]);
+  const [data, setData] = useState<ThreatData>({ classes: [], rank: { current: 76, total: 736 } });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [cmd, setCmd] = useState('');
   const [logs, setLogs] = useState<{type: string, msg: string}[]>([]);
   const [expanded, setExpanded] = useState<SubjectID | null>(null);
   const [importMode, setImportMode] = useState(false);
-  const [importData, setImportData] = useState({ subject: 'm', period: 'q3', grades: '' });
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-
+  const [importData, setImportData] = useState({ subject: 'm', period: 'q1', grades: '' });
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // --- CLOUD SYNC LOGIC ---
+  const addLog = useCallback((type: string, msg: string) => setLogs(prev => [...prev.slice(-4), { type, msg }]), []);
 
-  // 1. Load from Cloud on startup
   useEffect(() => {
     async function loadData() {
       try {
-        const res = await fetch('/api/sync');
+        const res = await fetch(`/api/sync?key=${SYNC_KEY}`);
         const json = await res.json();
-        if (json.data && Array.isArray(json.data.classes)) {
-          setClasses(json.data.classes);
-          addLog('ok', 'CLOUD DATA LOADED');
-        } else {
-          // No cloud data? Init defaults
-          initDefaults();
-        }
-      } catch (e) {
-        addLog('err', 'CLOUD LOAD FAILED');
-        initDefaults();
-      }
+        if (json.success && json.data) { setData(json.data); addLog('ok', 'CLOUD LOADED'); }
+        else { setData(prev => ({ ...prev, classes: createDefaultClasses() })); addLog('info', 'INIT DEFAULTS'); }
+      } catch (e) { addLog('err', 'LOAD FAILED'); setData(prev => ({ ...prev, classes: createDefaultClasses() })); }
       setLoading(false);
     }
     loadData();
-  }, []);
+  }, [addLog]);
 
-  // 2. Save to Cloud whenever classes change
   useEffect(() => {
-    // Don't save on initial load or if empty
-    if (loading || classes.length === 0) return;
-    
-    async function saveData() {
+    if (loading) return;
+    const timer = setTimeout(async () => {
       setSaving(true);
-      try {
-        await fetch('/api/sync', {
-          method: 'POST',
-          body: JSON.stringify({ payload: classes })
-        });
-        // addLog('info', 'Synced to Cloud'); // Optional: subtle log
-      } catch (e) {
-        addLog('err', 'CLOUD SAVE FAILED');
-      }
-      setSaving(false);
-    }
-    
-    // Debounce: Wait 1 second after typing stops before saving
-    const timer = setTimeout(saveData, 1000);
+      try { await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: SYNC_KEY, payload: data }) }); }
+      catch (e) { addLog('err', 'SAVE FAILED'); }
+      setTimeout(() => setSaving(false), 500);
+    }, 1000);
     return () => clearTimeout(timer);
-  }, [classes, loading]);
-
-  const initDefaults = () => {
-    const defaults: ClassData[] = Object.values(SUBJECT_MAP).map(s => ({
-      id: s.id, name: s.name, level: s.level, 
-      sem1: { q1: [], q2: [], q3: [] }, sem2: { q1: [], q2: [], q3: [] }
-    }));
-    setClasses(defaults);
-    addLog('info', 'INIT DEFAULTS');
-  };
-
-  const addLog = (type: string, msg: string) => setLogs(prev => [...prev.slice(-4), { type, msg }]);
-
-  // --- CLI & IMPORT (Same as before) ---
+  }, [data, loading, addLog]);
 
   useEffect(() => {
     const handleKey = () => { if(!importMode) inputRef.current?.focus(); };
@@ -149,7 +102,6 @@ export default function ThreatEngine() {
     const c = raw.trim().toLowerCase();
     if (c === 'import') { setImportMode(true); return; }
     if (c === 'clear') { setLogs([]); return; }
-    
     if (c.startsWith('+')) {
       const parts = raw.split(' ');
       const key = parts[0].substring(1);
@@ -162,174 +114,126 @@ export default function ThreatEngine() {
   };
 
   const injectGrades = (id: SubjectID, period: string, grades: number[]) => {
-    setClasses(prev => {
-      const n = [...prev];
-      const cls = n.find(c => c.id === id);
-      if(!cls) return n;
-      const entries = grades.map(g => ({ earned: g, possible: 100 }));
-      let targetArr;
-      if (period === 'q1') targetArr = cls.sem1.q1;
-      else if (period === 'q2') targetArr = cls.sem1.q2;
-      else targetArr = cls.sem2.q3;
-      targetArr.push(...entries);
-      addLog('ok', `LOGGED: ${cls.name} [${period}]`);
-      return n;
+    setData(prev => {
+      const newClasses = prev.classes.map(cls => {
+        if (cls.id !== id) return cls;
+        const entries = grades.map(g => ({ earned: g, possible: 100 }));
+        let newSem1 = { ...cls.sem1 }, newSem2 = { ...cls.sem2 };
+        if (period === 'q1') newSem1 = { ...newSem1, q1: [...newSem1.q1, ...entries] };
+        else if (period === 'q2') newSem1 = { ...newSem1, q2: [...newSem1.q2, ...entries] };
+        else if (period === 'q3') newSem2 = { ...newSem2, q3: [...newSem2.q3, ...entries] };
+        return { ...cls, sem1: newSem1, sem2: newSem2 };
+      });
+      addLog('ok', `LOGGED: ${SUBJECT_MAP[id]?.name || id} [${period}]`);
+      return { ...prev, classes: newClasses };
     });
   };
 
-  // --- RENDER ---
-
-  const gpa = calculateCumulativeGPA(classes);
-  const sortedClasses = [...classes].sort((a, b) => {
+  const gpa = calculateCumulativeGPA(data.classes);
+  const sortedClasses = [...data.classes].sort((a, b) => {
     const aAvg = getSemesterAvg(a.sem2) !== -1 ? getSemesterAvg(a.sem2) : getSemesterAvg(a.sem1);
     const bAvg = getSemesterAvg(b.sem2) !== -1 ? getSemesterAvg(b.sem2) : getSemesterAvg(b.sem1);
     return aAvg - bAvg;
   });
 
-  if (loading) return <div style={styles.main}>CONNECTING TO CLOUD...</div>;
+  if (loading) return <div style={s.main}>CONNECTING...</div>;
 
   return (
-    <main style={styles.main}>
+    <main style={s.main}>
       {importMode && (
-        <div style={styles.overlay}>
-          <div style={styles.modal}>
-            <div style={styles.modalHeader}>DATA INJECTOR</div>
-            <div style={styles.modalBody}>
-              <div style={styles.row}>
-                <select value={importData.subject} onChange={e => setImportData({...importData, subject: e.target.value})} style={styles.select}>
+        <div style={s.overlay}>
+          <div style={s.modal}>
+            <div style={s.modalHeader}>DATA INJECTOR</div>
+            <div style={s.modalBody}>
+              <div style={s.row}>
+                <select value={importData.subject} onChange={e => setImportData({...importData, subject: e.target.value})} style={s.select}>
                   {Object.entries(SUBJECT_MAP).map(([k, v]) => <option key={k} value={k}>{v.name}</option>)}
                 </select>
-                <select value={importData.period} onChange={e => setImportData({...importData, period: e.target.value})} style={styles.select}>
-                  <option value="q1">Q1 (Sem1)</option>
-                  <option value="q2">Q2 (Sem1)</option>
-                  <option value="q3">Q3 (Current)</option>
+                <select value={importData.period} onChange={e => setImportData({...importData, period: e.target.value})} style={s.select}>
+                  <option value="q1">Q1</option><option value="q2">Q2</option><option value="q3">Q3</option>
                 </select>
               </div>
-              <textarea placeholder="Paste grades..." value={importData.grades} onChange={e => setImportData({...importData, grades: e.target.value})} style={styles.textarea} />
-              <div style={styles.modalActions}>
-                <button onClick={() => setImportMode(false)} style={styles.cancelBtn}>CANCEL</button>
-                <button onClick={() => { injectGrades(importData.subject as SubjectID, importData.period, importData.grades.split(/[\s,]+/).map(Number).filter(n => !isNaN(n))); setImportMode(false); }} style={styles.injectBtn}>INJECT</button>
+              <textarea placeholder="Grades..." value={importData.grades} onChange={e => setImportData({...importData, grades: e.target.value})} style={s.textarea} />
+              <div style={s.modalActions}>
+                <button onClick={() => setImportMode(false)} style={s.cancelBtn}>CANCEL</button>
+                <button onClick={() => { injectGrades(importData.subject as SubjectID, importData.period, importData.grades.split(/[\s,]+/).map(Number).filter(n => !isNaN(n))); setImportMode(false); }} style={s.injectBtn}>INJECT</button>
               </div>
             </div>
           </div>
         </div>
       )}
-
-      <header style={styles.hud}>
-        <div style={styles.rowTop}>
-          <div style={styles.col}>
-            <span style={styles.label}>CLASS RANK</span>
-            <span style={{ ...styles.val, color: '#00F0FF' }}>
-              {RANK_INFO.current} <span style={{fontSize: '0.8rem', color: '#666'}}>/ {RANK_INFO.total}</span>
-            </span>
-          </div>
-          <div style={styles.col}>
-            <span style={styles.label}>PROJECTED GPA</span>
-            <span style={{ ...styles.val, color: gpa >= 5.75 ? '#00FF41' : '#FFB000', fontSize: '1.8rem' }}>
-              {gpa.toFixed(3)} {saving && <span style={{fontSize:'0.5rem', color:'#666'}}>SYNCING...</span>}
-            </span>
-          </div>
+      <header style={s.hud}>
+        <div style={s.rowTop}>
+          <div style={s.col}><span style={s.label}>RANK</span><span style={{...s.val, color:'#00F0FF'}}>{data.rank.current}/{data.rank.total}</span></div>
+          <div style={s.col}><span style={s.label}>GPA</span><span style={{...s.val, color: gpa>=5.75?'#00FF41':'#FFB000'}}>{gpa.toFixed(3)} {saving && <span style={{fontSize:'0.5rem',color:'#666'}}>SYNC</span>}</span></div>
         </div>
-        <div style={styles.hudBot}>
-          <div style={styles.bank}>
-            <span style={styles.bankLabel}>FOUNDATION</span>
-            <span style={styles.bankVal}>GEO: 5.5</span>
-          </div>
-          <div style={styles.statusLight}>Q3 IN PROGRESS</div>
-        </div>
+        <div style={s.hudBot}><span style={{color:'#666'}}>GEO: 5.5</span><span style={{color:'#FFB000'}}>Q3</span></div>
       </header>
-
-      <div style={styles.list}>
+      <div style={s.list}>
         {sortedClasses.map(cls => {
-          const s1Avg = getSemesterAvg(cls.sem1);
-          const s2Avg = getSemesterAvg(cls.sem2);
-          const isExpanded = expanded === cls.id;
+          const s1 = getSemesterAvg(cls.sem1), s2 = getSemesterAvg(cls.sem2);
           return (
-            <div key={cls.id} onClick={() => setExpanded(isExpanded ? null : cls.id)} style={styles.cardWrapper}>
-              <div style={styles.card}>
-                <div style={{ flex: 1 }}>
-                  <span style={{ ...styles.badge, borderColor: cls.level === 'L1' ? '#FFF' : '#888', color: cls.level === 'L1' ? '#FFF' : '#888' }}>{cls.level}</span>
-                  <span style={styles.name}>{cls.name}</span>
-                </div>
-                <div style={styles.data}>
-                  <div style={styles.semBlock}>
-                    <span style={styles.semLabel}>SEM 1</span>
-                    <span style={styles.semVal}>{s1Avg !== -1 ? s1Avg.toFixed(1) : '--'}</span>
-                  </div>
-                  <div style={styles.semBlock}>
-                    <span style={styles.semLabel}>CURR</span>
-                    <span style={{ ...styles.semVal, color: s2Avg >= 90 ? '#00FF41' : '#FFB000' }}>{s2Avg !== -1 ? s2Avg.toFixed(1) : '--'}</span>
-                  </div>
+            <div key={cls.id} onClick={() => setExpanded(expanded === cls.id ? null : cls.id)} style={s.cardWrapper}>
+              <div style={s.card}>
+                <div><span style={{...s.badge, borderColor: cls.level==='L1'?'#FFF':'#888', color: cls.level==='L1'?'#FFF':'#888'}}>{cls.level}</span> {cls.name}</div>
+                <div style={s.data}>
+                  <div><span style={s.semLabel}>S1</span><span style={s.semVal}>{s1!==-1?s1.toFixed(1):'--'}</span></div>
+                  <div><span style={s.semLabel}>CUR</span><span style={{...s.semVal, color: s2>=90?'#00FF41':s2>=0?'#FFB000':'#666'}}>{s2!==-1?s2.toFixed(1):'--'}</span></div>
                 </div>
               </div>
-              {isExpanded && (
-                <div style={styles.exp}>
-                  <div style={styles.expSec}>SEM 1 - Q1 [{cls.sem1.q1.length}]</div>
-                  <div style={styles.gList}>{cls.sem1.q1.map((g,i) => <div key={i} style={styles.gItem}>{g.earned}</div>)}</div>
-                  <div style={styles.expSec}>SEM 1 - Q2 [{cls.sem1.q2.length}]</div>
-                  <div style={styles.gList}>{cls.sem1.q2.map((g,i) => <div key={i} style={styles.gItem}>{g.earned}</div>)}</div>
-                  <div style={styles.expSec}>CURRENT - Q3 [{cls.sem2.q3.length}]</div>
-                  <div style={styles.gList}>{cls.sem2.q3.map((g,i) => <div key={i} style={styles.gItem}>{g.earned}</div>)}</div>
+              {expanded === cls.id && (
+                <div style={s.exp}>
+                  <div style={s.expSec}>Q1 [{cls.sem1.q1.length}]</div>
+                  <div style={s.gList}>{cls.sem1.q1.map((g,i) => <span key={i} style={s.gItem}>{g.earned}</span>)}</div>
+                  <div style={s.expSec}>Q2 [{cls.sem1.q2.length}]</div>
+                  <div style={s.gList}>{cls.sem1.q2.map((g,i) => <span key={i} style={s.gItem}>{g.earned}</span>)}</div>
+                  <div style={s.expSec}>Q3 [{cls.sem2.q3.length}]</div>
+                  <div style={s.gList}>{cls.sem2.q3.map((g,i) => <span key={i} style={s.gItem}>{g.earned}</span>)}</div>
                 </div>
               )}
             </div>
           );
         })}
       </div>
-
-      <div style={styles.log}>
-        {logs.map((l, i) => <div key={i} style={{ color: l.type === 'err' ? '#FF1744' : l.type === 'ok' ? '#00FF41' : '#666' }}>{`> ${l.msg}`}</div>)}
-      </div>
-
-      <footer style={styles.footer}>
-        <span style={styles.prompt}>{`>`}</span>
-        <input ref={inputRef} value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { handleCmd(cmd); setCmd(''); }}} style={styles.input} />
+      <div style={s.log}>{logs.map((l,i) => <div key={i} style={{color: l.type==='err'?'#FF1744':l.type==='ok'?'#00FF41':'#666'}}>&gt; {l.msg}</div>)}</div>
+      <footer style={s.footer}>
+        <span style={{color:'#FF1744'}}>&gt;</span>
+        <input ref={inputRef} value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { handleCmd(cmd); setCmd(''); }}} placeholder="type 'import' or '+m q1 95 92'..." style={s.input} />
       </footer>
     </main>
   );
 }
 
-const styles: { [key: string]: React.CSSProperties } = {
-  main: { height: '100vh', background: '#000', color: '#FFF', fontFamily: 'monospace', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  overlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.95)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  modal: { width: '90%', maxWidth: '500px', background: '#111', border: '1px solid #00FF41', padding: '20px' },
-  modalHeader: { fontSize: '0.8rem', color: '#00FF41', borderBottom: '1px solid #222', paddingBottom: '10px', marginBottom: '15px', letterSpacing: '2px' },
+const s: { [key: string]: React.CSSProperties } = {
+  main: { flex: 1, background: '#0A0A0A', color: '#FFF', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  modal: { width: '90%', maxWidth: '500px', background: '#111', border: '1px solid #FF1744', padding: '20px' },
+  modalHeader: { fontSize: '0.8rem', color: '#FF1744', borderBottom: '1px solid #222', paddingBottom: '10px', marginBottom: '15px', letterSpacing: '2px' },
   modalBody: { display: 'flex', flexDirection: 'column', gap: '15px' },
   row: { display: 'flex', gap: '10px' },
-  select: { flex: 1, background: '#000', border: '1px solid #333', color: '#FFF', padding: '8px', fontFamily: 'monospace' },
-  textarea: { width: '100%', height: '80px', background: '#000', border: '1px solid #333', color: '#FFF', padding: '10px', fontFamily: 'monospace', resize: 'none', fontSize: '0.8rem' },
+  select: { flex: 1, background: '#000', border: '1px solid #333', color: '#FFF', padding: '8px' },
+  textarea: { width: '100%', height: '80px', background: '#000', border: '1px solid #333', color: '#FFF', padding: '10px', resize: 'none' },
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' },
-  cancelBtn: { background: 'transparent', color: '#666', border: '1px solid #333', padding: '5px 15px', cursor: 'pointer' },
-  injectBtn: { background: '#00FF41', color: '#000', border: 'none', padding: '5px 15px', fontWeight: 'bold', cursor: 'pointer' },
-  
+  cancelBtn: { background: 'transparent', color: '#666', border: '1px solid #333', padding: '8px 15px', cursor: 'pointer' },
+  injectBtn: { background: '#FF1744', color: '#FFF', border: 'none', padding: '8px 15px', fontWeight: 'bold', cursor: 'pointer' },
   hud: { borderBottom: '2px solid #333', padding: '15px', background: '#050505' },
   rowTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '10px' },
   col: { display: 'flex', flexDirection: 'column' },
   label: { fontSize: '0.6rem', color: '#666', letterSpacing: '1px' },
   val: { fontSize: '1.2rem', fontWeight: 'bold' },
-  hudBot: { display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #222', paddingTop: '5px', fontSize: '0.7rem' },
-  bank: { display: 'flex', gap: '5px', color: '#666' },
-  bankLabel: { border: '1px solid #333', padding: '0 3px', fontSize: '0.6rem' },
-  bankVal: { color: '#00FF41' },
-  statusLight: { color: '#FFB000', letterSpacing: '2px' },
-
+  hudBot: { display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #222', paddingTop: '8px', fontSize: '0.7rem' },
   list: { flex: 1, overflowY: 'auto' },
-  cardWrapper: { borderBottom: '1px solid #111' },
-  card: { padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer' },
-  badge: { fontSize: '0.5rem', border: '1px solid', padding: '1px 3px', marginRight: '8px' },
-  name: { fontSize: '0.9rem' },
-  data: { display: 'flex', alignItems: 'center', gap: '15px' },
-  semBlock: { textAlign: 'right' },
+  cardWrapper: { borderBottom: '1px solid #111', cursor: 'pointer' },
+  card: { padding: '12px 15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  badge: { fontSize: '0.5rem', border: '1px solid', padding: '1px 4px', marginRight: '8px' },
+  data: { display: 'flex', gap: '15px' },
   semLabel: { display: 'block', fontSize: '0.5rem', color: '#666' },
   semVal: { fontSize: '1rem', fontWeight: 'bold' },
-
   exp: { background: '#0A0A0A', padding: '10px 20px 15px', borderBottom: '1px solid #222' },
   expSec: { marginTop: '10px', fontSize: '0.7rem', color: '#555' },
   gList: { display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '5px' },
-  gItem: { background: '#111', border: '1px solid #333', padding: '2px 6px', fontSize: '0.8rem' },
-
+  gItem: { background: '#111', border: '1px solid #333', padding: '2px 8px', fontSize: '0.8rem' },
   log: { height: '40px', fontSize: '0.7rem', padding: '5px 15px', overflow: 'hidden', borderTop: '1px solid #222' },
   footer: { display: 'flex', alignItems: 'center', padding: '10px 15px', background: '#000', borderTop: '1px solid #333' },
-  prompt: { color: '#00FF41', marginRight: '10px' },
-  input: { background: 'transparent', border: 'none', color: '#FFF', flex: 1, outline: 'none', fontFamily: 'monospace', fontSize: '1rem' },
+  input: { background: 'transparent', border: 'none', color: '#FFF', flex: 1, outline: 'none', fontSize: '0.9rem' },
 };
