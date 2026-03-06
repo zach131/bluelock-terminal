@@ -2,33 +2,22 @@
 
 import { useState } from 'react';
 
-// Same logic as Tracker but isolated
-const GPA_SCALE = [
-  [97, 100, 4.0], [93, 96, 3.8], [90, 92, 3.6], 
-  [87, 89, 3.4], [83, 86, 3.2], [80, 82, 3.0],
-  [77, 79, 2.8], [73, 76, 2.6], [70, 72, 2.4], 
-  [0, 69, 0.0]
-];
+// LINEAR SCALE LOGIC (Matching Main Engine)
+// L1: 100=6.0, 99=5.9... (Grade - 40) / 10
+// L2: 100=5.0, 99=4.9... (Grade - 50) / 10
 
 export default function Calculator() {
   const [grade, setGrade] = useState(95);
   const [level, setLevel] = useState<'L1' | 'L2'>('L1');
   const [count, setCount] = useState(7);
 
-  const getBase = (g: number) => {
-    for (const [min, max, pts] of GPA_SCALE) {
-      if (g >= min && g <= max) return pts;
-    }
-    return 0;
-  };
-
   const calculateGPA = () => {
-    const base = getBase(grade);
-    const weight = level === 'L1' ? 2.0 : 1.0;
-    return base + weight;
+    if (level === 'L1') return (grade - 40) / 10;
+    return (grade - 50) / 10;
   };
 
   const classGpa = calculateGPA();
+  // Project Cumulative (Foundation 5.5 + Classes)
   const cumGpa = ((5.5 + (classGpa * count)) / (1 + count));
 
   return (
@@ -82,7 +71,7 @@ export default function Calculator() {
           </div>
           <div style={styles.divider} />
           <div style={styles.resultRow}>
-            <span style={styles.resLabel}>CUMULATIVE IMPACT</span>
+            <span style={styles.resLabel}>PROJECTED CUMULATIVE</span>
             <span style={{ ...styles.resVal, fontSize: '2rem' }}>
               {cumGpa.toFixed(3)}
             </span>
