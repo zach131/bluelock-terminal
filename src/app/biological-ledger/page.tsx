@@ -1,12 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 
-// ═══════════════════════════════════════════════════════════════
-// BIOLOGICAL LEDGER - Physical Evolution Tracker
-// Iron/Plyometrics with Cloud Sync
-// ═══════════════════════════════════════════════════════════════
-
+// ... (Keep Interfaces: Set, Exercise, WorkoutSession, PlyometricLog, FitnessData) ...
 interface Set { weight: number; reps: number; id: string; }
 interface Exercise { name: string; sets: Set[]; isPR?: boolean; }
 interface WorkoutSession { id: string; date: string; type: 'push' | 'pull' | 'legs' | 'cardio' | 'plyo' | 'other'; exercises: Exercise[]; totalVolume: number; }
@@ -14,11 +11,11 @@ interface PlyometricLog { date: string; verticalJump: number; broadJump?: number
 interface FitnessData { workouts: WorkoutSession[]; plyometrics: PlyometricLog[]; personalRecords: Record<string, number>; streak: number; lastWorkoutDate: string | null; totalWorkouts: number; }
 
 type ViewMode = 'log' | 'history' | 'plyo' | 'prs';
-
 const SYNC_KEY = 'bluelock_biological_ledger';
 const generateId = () => Math.random().toString(36).substring(2, 9);
 const getToday = () => new Date().toISOString().split('T')[0];
 
+// ... (Keep Helper Functions: calculateStreak, getWeeklyWorkouts) ...
 function calculateStreak(workouts: WorkoutSession[]): number {
   if (workouts.length === 0) return 0;
   const sortedDates = [...new Set(workouts.map(w => w.date))].sort().reverse();
@@ -43,7 +40,7 @@ function getWeeklyWorkouts(workouts: WorkoutSession[]): number {
 export default function BiologicalLedger() {
   const [data, setData] = useState<FitnessData>({ workouts: [], plyometrics: [], personalRecords: {}, streak: 0, lastWorkoutDate: null, totalWorkouts: 0 });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | 'idle'>('idle');
   const [view, setView] = useState<ViewMode>('log');
   const [currentWorkout, setCurrentWorkout] = useState<WorkoutSession | null>(null);
   const [exerciseName, setExerciseName] = useState('');
@@ -54,30 +51,47 @@ export default function BiologicalLedger() {
   const [verticalJump, setVerticalJump] = useState('');
   const [broadJump, setBroadJump] = useState('');
 
+  // Load data once on mount
   useEffect(() => {
     async function loadData() {
       try {
         const res = await fetch(`/api/sync?key=${SYNC_KEY}`);
         const json = await res.json();
-        if (json.success && json.data) setData(json.data);
-      } catch (e) { console.error('Failed to load:', e); }
+        if (json.success && json.data) {
+          setData(json.data);
+          setSaveStatus('saved');
+        }
+      } catch (e) { 
+        console.error('Failed to load:', e); 
+        setSaveStatus('error');
+      }
       setLoading(false);
     }
     loadData();
   }, []);
 
-  const saveData = useCallback(async (newData: FitnessData) => {
-    setSaving(true);
+  // Manual Save Function
+  const saveToCloud = useCallback(async () => {
+    setSaveStatus('saving');
     try {
-      await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: SYNC_KEY, payload: newData }) });
-    } catch (e) { console.error('Failed to save:', e); }
-    setTimeout(() => setSaving(false), 500);
-  }, []);
+      const res = await fetch('/api/sync', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ key: SYNC_KEY, payload: data }) 
+      });
+      const json = await res.json();
+      if (json.success) {
+        setSaveStatus('saved');
+      } else {
+        setSaveStatus('error');
+      }
+    } catch (e) {
+      console.error('Failed to save:', e);
+      setSaveStatus('error');
+    }
+  }, [data]);
 
-  useEffect(() => {
-    if (!loading) { const timer = setTimeout(() => saveData(data), 1000); return () => clearTimeout(timer); }
-  }, [data, loading, saveData]);
-
+  // ... (Keep Logic Functions: startWorkout, addSet, saveExercise, finishWorkout, logPlyo, deleteWorkout) ...
   const startWorkout = () => setCurrentWorkout({ id: generateId(), date: getToday(), type: workoutType, exercises: [], totalVolume: 0 });
   
   const addSet = () => {
@@ -129,9 +143,28 @@ export default function BiologicalLedger() {
       <header style={s.header}>
         <div style={s.headerTitle}>CORE_02: BIOLOGICAL LEDGER</div>
         <div style={s.headerSubtitle}>PHYSICAL EVOLUTION</div>
-        {saving && <div style={s.sync}>SYNC</div>}
       </header>
       
+      {/* NEW: Trustworthy Save UI */}
+      <div style={s.controlBar}>
+        <div style={s.saveInfo}>
+          <span style={{
+            ...s.statusDot, 
+            backgroundColor: saveStatus === 'saved' ? '#00FF41' : saveStatus === 'saving' ? '#FFB000' : '#FF1744'
+          }} />
+          <span style={{color: '#888', fontSize: '0.7rem'}}>
+            {saveStatus === 'saved' ? 'CLOUD SYNCED' : saveStatus === 'saving' ? 'SAVING...' : saveStatus === 'error' ? 'CONNECTION LOST' : 'READY'}
+          </span>
+        </div>
+        <button onClick={saveToCloud} disabled={saveStatus === 'saving'} style={{
+          ...s.saveBtn, 
+          opacity: saveStatus === 'saving' ? 0.5 : 1,
+          border: saveStatus === 'saved' ? '1px solid #00FF41' : '1px solid #333'
+        }}>
+          {saveStatus === 'saving' ? 'SAVING...' : 'FORCE SAVE'}
+        </button>
+      </div>
+
       <div style={s.statsBar}>
         <div style={s.stat}><span style={s.statVal}>{data.streak}</span><span style={s.statLabel}>STREAK</span></div>
         <div style={s.stat}><span style={s.statVal}>{weeklyCount}/5</span><span style={s.statLabel}>WEEKLY</span></div>
@@ -144,13 +177,14 @@ export default function BiologicalLedger() {
         ))}
       </nav>
       
+      {/* ... (Keep existing View Logic: log, history, plyo, prs) ... */}
       <div style={s.content}>
         {view === 'log' && (currentWorkout ? (
           <div style={s.form}>
             <div style={s.formHeader}><span>{currentWorkout.type.toUpperCase()}</span><span style={{color:'#666'}}>{currentWorkout.date}</span></div>
             <div style={s.inputGroup}>
               <input type="text" placeholder="EXERCISE NAME" value={exerciseName} onChange={e=>setExerciseName(e.target.value)} style={s.input} />
-              {sets.length > 0 && <div style={s.setsList}>{sets.map((s,i) => <div key={s.id} style={s.setItem}>SET {i+1}: {s.weight}×{s.reps} = {s.weight*s.reps}</div>)}</div>}
+              {sets.length > 0 && <div style={s.setsList}>{sets.map((st,i) => <div key={st.id} style={s.setItem}>SET {i+1}: {st.weight}×{st.reps} = {st.weight*st.reps}</div>)}</div>}
               <div style={s.row}>
                 <input type="number" placeholder="LBS" value={weight} onChange={e=>setWeight(e.target.value)} style={s.smallInput} />
                 <span style={{color:'#666'}}>×</span>
@@ -162,7 +196,7 @@ export default function BiologicalLedger() {
             {currentWorkout.exercises.length > 0 && (
               <div style={s.session}>
                 <div style={s.sessionHeader}>SESSION</div>
-                {currentWorkout.exercises.map((ex,i) => <div key={i} style={s.exItem}>{ex.name} {ex.isPR && <span style={s.prTag}>PR!</span>} <span style={{color:'#888'}}>{ex.sets.map(s=>`${s.weight}×${s.reps}`).join(', ')}</span></div>)}
+                {currentWorkout.exercises.map((ex,i) => <div key={i} style={s.exItem}>{ex.name} {ex.isPR && <span style={s.prTag}>PR!</span>} <span style={{color:'#888'}}>{ex.sets.map(se=>`${se.weight}×${se.reps}`).join(', ')}</span></div>)}
                 <div style={s.volume}>VOL: {currentWorkout.totalVolume.toLocaleString()} lbs</div>
               </div>
             )}
@@ -188,7 +222,7 @@ export default function BiologicalLedger() {
             {data.workouts.length === 0 ? <div style={s.empty}>No workouts yet.</div> : [...data.workouts].reverse().map(w => (
               <div key={w.id} style={s.historyCard}>
                 <div style={s.historyHeader}><span style={{color:'#00FF7F'}}>{w.type.toUpperCase()}</span><span style={{color:'#666'}}>{w.date}</span><button onClick={()=>deleteWorkout(w.id)} style={s.delBtn}>×</button></div>
-                {w.exercises.map((ex,i) => <div key={i} style={s.historyEx}>{ex.name}: {ex.sets.map(s=>`${s.weight}×${s.reps}`).join(', ')}</div>)}
+                {w.exercises.map((ex,i) => <div key={i} style={s.historyEx}>{ex.name}: {ex.sets.map(se=>`${se.weight}×${se.reps}`).join(', ')}</div>)}
                 <div style={s.historyVol}>VOL: {w.totalVolume.toLocaleString()} lbs</div>
               </div>
             ))}
@@ -231,19 +265,25 @@ export default function BiologicalLedger() {
         )}
       </div>
       
-      <footer style={s.footer}><a href="/" style={s.backLink}>⟵ MAINFRAME</a></footer>
+      <footer style={s.footer}>
+        <Link href="/" style={s.backLink}>⟵ MAINFRAME</Link>
+      </footer>
     </main>
   );
 }
 
 const s: { [key: string]: React.CSSProperties } = {
+  // ... (Keep existing styles, add new controlBar styles) ...
   main: { minHeight: '100vh', backgroundColor: '#0A0A0A', color: '#FFF', display: 'flex', flexDirection: 'column' },
   loading: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00FF7F' },
   header: { padding: '1rem', textAlign: 'center', borderBottom: '2px solid #00FF7F', position: 'relative' },
   headerTitle: { fontSize: '0.9rem', fontWeight: 'bold', color: '#00FF7F', letterSpacing: '0.2em' },
   headerSubtitle: { fontSize: '0.7rem', color: '#666', letterSpacing: '0.1em' },
-  sync: { position: 'absolute', right: '1rem', top: '50%', transform: 'translateY(-50%)', fontSize: '0.6rem', color: '#666' },
-  statsBar: { display: 'flex', justifyContent: 'space-around', padding: '1rem', backgroundColor: '#111' },
+  controlBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', backgroundColor: '#111', borderBottom: '1px solid #222' },
+  saveInfo: { display: 'flex', alignItems: 'center', gap: '0.5rem' },
+  statusDot: { width: '8px', height: '8px', borderRadius: '50%' },
+  saveBtn: { background: 'transparent', color: '#FFF', padding: '0.5rem 1rem', fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.2s' },
+  statsBar: { display: 'flex', justifyContent: 'space-around', padding: '1rem', backgroundColor: '#0A0A0A' },
   stat: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' },
   statVal: { fontSize: '1.5rem', fontWeight: 'bold', color: '#00FF7F' },
   statLabel: { fontSize: '0.6rem', color: '#666' },
@@ -264,7 +304,6 @@ const s: { [key: string]: React.CSSProperties } = {
   row: { display: 'flex', alignItems: 'center', gap: '0.5rem' },
   smallInput: { width: '60px', padding: '0.5rem', background: '#0A0A0A', border: '1px solid #333', color: '#FFF', textAlign: 'center' },
   addBtn: { padding: '0.5rem 1rem', background: '#222', border: '1px solid #333', color: '#FFF', cursor: 'pointer' },
-  saveBtn: { padding: '0.75rem', background: '#00FF7F', color: '#000', border: 'none', fontWeight: 'bold', cursor: 'pointer' },
   session: { padding: '1rem', backgroundColor: '#0F0F0F', border: '1px solid #222' },
   sessionHeader: { color: '#00FF7F', fontSize: '0.7rem', marginBottom: '0.5rem' },
   exItem: { display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #1A1A1A' },
