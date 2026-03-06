@@ -41,6 +41,6 @@ const styles: { [key: string]: React.CSSProperties } = {
   container: { display: 'flex', flexDirection: 'column', height: '100vh', background: '#000', color: '#FFF', fontFamily: 'monospace' },
   nav: { display: 'flex', alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #222', background: '#050505' },
   link: { padding: '5px 15px', fontSize: '0.8rem', letterSpacing: '1px', textDecoration: 'none' },
-  homeLink: { fontSize: '0.7rem', color: '#666', textDecoration: 'none', border: '1px solid #333', padding: '2px 8px' },
+  homeLink: { fontSize: '0.7rem', color: '#00F0FF', textDecoration: 'none', border: '1px solid #333', padding: '2px 8px' },
   content: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
 };
