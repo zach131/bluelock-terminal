@@ -3,33 +3,16 @@
 import { useState, useEffect, useRef } from 'react';
 
 // ═══════════════════════════════════════════════════════════════
-// CONSTANTS & TYPES
+// TYPES & CONSTANTS
 // ═══════════════════════════════════════════════════════════════
 
 type SubjectID = 'alg' | 'csp' | 'aphu' | 'bio' | 'eng' | 'spa' | 'band';
-
 interface GradeEntry { earned: number; possible: number; }
+interface SemesterData { q1: GradeEntry[]; q2: GradeEntry[]; q3: GradeEntry[]; }
+interface ClassData { id: SubjectID; name: string; level: 'L1' | 'L2'; sem1: SemesterData; sem2: SemesterData; }
 
-interface SemesterData {
-  q1: GradeEntry[]; // 1st 9 Weeks
-  q2: GradeEntry[]; // 2nd 9 Weeks
-  q3: GradeEntry[]; // 3rd 9 Weeks (Current)
-}
-
-interface ClassData {
-  id: SubjectID;
-  name: string;
-  level: 'L1' | 'L2';
-  sem1: SemesterData; // Semester 1 is now "Banked" history
-  sem2: SemesterData; // Semester 2 is Current
-}
-
-// RANK INFO
 const RANK_INFO = { current: 76, total: 736 };
 
-// GPA FORMULA (Linear Scale)
-// L1: 100=6.0, 99=5.9... (Grade - 40) / 10
-// L2: 100=5.0, 99=4.9... (Grade - 50) / 10
 function calculateGPAValue(grade: number, level: 'L1' | 'L2'): number {
   if (level === 'L1') return (grade - 40) / 10;
   return (grade - 50) / 10;
@@ -46,56 +29,36 @@ const SUBJECT_MAP: { [key: string]: { name: string; id: SubjectID; level: 'L1' |
 };
 
 // ═══════════════════════════════════════════════════════════════
-// UTILITY FUNCTIONS
+// UTILS
 // ═══════════════════════════════════════════════════════════════
 
 function getAvg(arr: GradeEntry[]): number {
-  if (arr.length === 0) return -1; // -1 indicates no data
+  if (arr.length === 0) return -1;
   const sum = arr.reduce((a, b) => a + b.earned, 0);
   const poss = arr.reduce((a, b) => a + b.possible, 0);
   return poss === 0 ? -1 : (sum / poss) * 100;
 }
 
-// Calculate Semester Average (Q1 50% + Q2 50% or single Q if only one)
 function getSemesterAvg(sem: SemesterData): number {
   const q1 = getAvg(sem.q1);
   const q2 = getAvg(sem.q2);
-  const q3 = getAvg(sem.q3); // For current semester calc
-
-  // For Sem 1 (Q1+Q2)
+  const q3 = getAvg(sem.q3);
   if (q1 !== -1 && q2 !== -1) return (q1 + q2) / 2;
   if (q1 !== -1) return q1;
   if (q2 !== -1) return q2;
-  
-  // For Sem 2 (Q3 currently)
   if (q3 !== -1) return q3;
   return -1;
 }
 
 function calculateCumulativeGPA(classes: ClassData[]): number {
-  // 1. Geometry Foundation (1.0 Credit @ 5.5)
-  let totalPoints = 5.5;
+  let totalPoints = 5.5; // Geo
   let totalCredits = 1.0;
-
   classes.forEach(cls => {
-    // Sem 1 Credit?
     const s1Avg = getSemesterAvg(cls.sem1);
-    if (s1Avg !== -1) {
-      totalPoints += calculateGPAValue(s1Avg, cls.level);
-      totalCredits += 1.0;
-    }
-
-    // Sem 2 Credit? (Currently in progress, we count it as 0.5 or 1.0 projected?)
-    // Let's count projected for "Current Pace" calculation
+    if (s1Avg !== -1) { totalPoints += calculateGPAValue(s1Avg, cls.level); totalCredits += 1.0; }
     const s2Avg = getSemesterAvg(cls.sem2);
-    if (s2Avg !== -1) {
-       // Only count current progress
-       totalPoints += calculateGPAValue(s2Avg, cls.level);
-       totalCredits += 1.0; // Projecting full credit for simplicity or adjust to 0.5?
-       // User said Rank updates Semesters. Let's count completed credits + current projection.
-    }
+    if (s2Avg !== -1) { totalPoints += calculateGPAValue(s2Avg, cls.level); totalCredits += 1.0; }
   });
-
   return totalCredits > 0 ? totalPoints / totalCredits : 0;
 }
 
@@ -108,69 +71,92 @@ export default function ThreatEngine() {
   const [cmd, setCmd] = useState('');
   const [logs, setLogs] = useState<{type: string, msg: string}[]>([]);
   const [expanded, setExpanded] = useState<SubjectID | null>(null);
-  
-  // UI States
   const [importMode, setImportMode] = useState(false);
   const [importData, setImportData] = useState({ subject: 'm', period: 'q3', grades: '' });
-  const [syncMode, setSyncMode] = useState(false);
-  const [syncCode, setSyncCode] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // INIT
+  // --- CLOUD SYNC LOGIC ---
+
+  // 1. Load from Cloud on startup
   useEffect(() => {
-    const stored = localStorage.getItem('virtue_os_v6');
-    if (stored) setClasses(JSON.parse(stored));
-    else {
-      const defaults: ClassData[] = Object.values(SUBJECT_MAP).map(s => ({
-        id: s.id, name: s.name, level: s.level, 
-        sem1: { q1: [], q2: [], q3: [] }, // Q3 unused in Sem1
-        sem2: { q1: [], q2: [], q3: [] }  // Q3 is current
-      }));
-      setClasses(defaults);
+    async function loadData() {
+      try {
+        const res = await fetch('/api/sync');
+        const json = await res.json();
+        if (json.data && Array.isArray(json.data.classes)) {
+          setClasses(json.data.classes);
+          addLog('ok', 'CLOUD DATA LOADED');
+        } else {
+          // No cloud data? Init defaults
+          initDefaults();
+        }
+      } catch (e) {
+        addLog('err', 'CLOUD LOAD FAILED');
+        initDefaults();
+      }
+      setLoading(false);
     }
-    addLog('info', 'SYSTEM ONLINE. TYPE "import" or "sync".');
+    loadData();
   }, []);
 
-  // SAVE
+  // 2. Save to Cloud whenever classes change
   useEffect(() => {
-    if (classes.length > 0) localStorage.setItem('virtue_os_v6', JSON.stringify(classes));
-  }, [classes]);
+    // Don't save on initial load or if empty
+    if (loading || classes.length === 0) return;
+    
+    async function saveData() {
+      setSaving(true);
+      try {
+        await fetch('/api/sync', {
+          method: 'POST',
+          body: JSON.stringify({ payload: classes })
+        });
+        // addLog('info', 'Synced to Cloud'); // Optional: subtle log
+      } catch (e) {
+        addLog('err', 'CLOUD SAVE FAILED');
+      }
+      setSaving(false);
+    }
+    
+    // Debounce: Wait 1 second after typing stops before saving
+    const timer = setTimeout(saveData, 1000);
+    return () => clearTimeout(timer);
+  }, [classes, loading]);
 
-  // FOCUS
-  useEffect(() => {
-    const handleKey = () => { if(!importMode && !syncMode) inputRef.current?.focus(); };
-    window.addEventListener('keypress', handleKey);
-    return () => window.removeEventListener('keypress', handleKey);
-  }, [importMode, syncMode]);
+  const initDefaults = () => {
+    const defaults: ClassData[] = Object.values(SUBJECT_MAP).map(s => ({
+      id: s.id, name: s.name, level: s.level, 
+      sem1: { q1: [], q2: [], q3: [] }, sem2: { q1: [], q2: [], q3: [] }
+    }));
+    setClasses(defaults);
+    addLog('info', 'INIT DEFAULTS');
+  };
 
   const addLog = (type: string, msg: string) => setLogs(prev => [...prev.slice(-4), { type, msg }]);
 
-  // CLI HANDLER
+  // --- CLI & IMPORT (Same as before) ---
+
+  useEffect(() => {
+    const handleKey = () => { if(!importMode) inputRef.current?.focus(); };
+    window.addEventListener('keypress', handleKey);
+    return () => window.removeEventListener('keypress', handleKey);
+  }, [importMode]);
+
   const handleCmd = (raw: string) => {
     const c = raw.trim().toLowerCase();
-    
     if (c === 'import') { setImportMode(true); return; }
-    if (c === 'sync') { 
-      generateSyncCode();
-      setSyncMode(true); 
-      return; 
-    }
     if (c === 'clear') { setLogs([]); return; }
     
-    // Quick Add Logic (+m q3 100 90)
     if (c.startsWith('+')) {
-      const parts = raw.split(' '); // Keep case for numbers
+      const parts = raw.split(' ');
       const key = parts[0].substring(1);
-      const period = parts[1]; // q1, q2, q3
+      const period = parts[1];
       const grades = parts.slice(2).map(g => parseInt(g)).filter(g => !isNaN(g));
-      
       const target = SUBJECT_MAP[key.toLowerCase()];
-      if (!target || !period || grades.length === 0) {
-        addLog('err', 'SYNTAX: +[sub] [q1/q2/q3] [grades]');
-        return;
-      }
-      
+      if (!target || !period || grades.length === 0) { addLog('err', 'SYNTAX'); return; }
       injectGrades(target.id, period, grades);
     }
   };
@@ -180,56 +166,30 @@ export default function ThreatEngine() {
       const n = [...prev];
       const cls = n.find(c => c.id === id);
       if(!cls) return n;
-
       const entries = grades.map(g => ({ earned: g, possible: 100 }));
-      
-      // Determine target array
-      // If period is q1 or q2, it goes to sem1. q3 goes to sem2.
-      // Actually, for simplicity, user specifies period.
-      // q1/q2 -> sem1. q3 -> sem2.
       let targetArr;
       if (period === 'q1') targetArr = cls.sem1.q1;
       else if (period === 'q2') targetArr = cls.sem1.q2;
       else targetArr = cls.sem2.q3;
-
       targetArr.push(...entries);
-      addLog('ok', `LOGGED: ${cls.name} [${period}] +${entries.length}`);
+      addLog('ok', `LOGGED: ${cls.name} [${period}]`);
       return n;
     });
   };
 
-  // SYNC LOGIC
-  const generateSyncCode = () => {
-    const data = JSON.stringify(classes);
-    // Simple Base64 encoding for copy-paste
-    const code = btoa(data);
-    setSyncCode(code);
-  };
+  // --- RENDER ---
 
-  const applySyncCode = () => {
-    try {
-      const data = JSON.parse(atob(syncCode));
-      setClasses(data);
-      addLog('ok', 'DATA SYNCED FROM CODE');
-      setSyncMode(false);
-    } catch (e) {
-      addLog('err', 'INVALID SYNC CODE');
-    }
-  };
-
-  // CALCULATIONS
   const gpa = calculateCumulativeGPA(classes);
-  
-  // Sort: Lowest GPA first
   const sortedClasses = [...classes].sort((a, b) => {
     const aAvg = getSemesterAvg(a.sem2) !== -1 ? getSemesterAvg(a.sem2) : getSemesterAvg(a.sem1);
     const bAvg = getSemesterAvg(b.sem2) !== -1 ? getSemesterAvg(b.sem2) : getSemesterAvg(b.sem1);
     return aAvg - bAvg;
   });
 
+  if (loading) return <div style={styles.main}>CONNECTING TO CLOUD...</div>;
+
   return (
     <main style={styles.main}>
-      {/* MODALS */}
       {importMode && (
         <div style={styles.overlay}>
           <div style={styles.modal}>
@@ -255,23 +215,6 @@ export default function ThreatEngine() {
         </div>
       )}
 
-      {syncMode && (
-        <div style={styles.overlay}>
-          <div style={styles.modal}>
-            <div style={styles.modalHeader}>CROSS-DEVICE SYNC</div>
-            <div style={styles.modalBody}>
-              <div style={styles.hint}>EXPORT: Copy this code on Device A. Paste on Device B.</div>
-              <textarea value={syncCode} onChange={e => setSyncCode(e.target.value)} style={styles.textarea} />
-              <div style={styles.modalActions}>
-                <button onClick={() => setSyncMode(false)} style={styles.cancelBtn}>CLOSE</button>
-                <button onClick={applySyncCode} style={styles.injectBtn}>IMPORT CODE</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* HEADER HUD */}
       <header style={styles.hud}>
         <div style={styles.rowTop}>
           <div style={styles.col}>
@@ -283,7 +226,7 @@ export default function ThreatEngine() {
           <div style={styles.col}>
             <span style={styles.label}>PROJECTED GPA</span>
             <span style={{ ...styles.val, color: gpa >= 5.75 ? '#00FF41' : '#FFB000', fontSize: '1.8rem' }}>
-              {gpa.toFixed(3)}
+              {gpa.toFixed(3)} {saving && <span style={{fontSize:'0.5rem', color:'#666'}}>SYNCING...</span>}
             </span>
           </div>
         </div>
@@ -292,19 +235,15 @@ export default function ThreatEngine() {
             <span style={styles.bankLabel}>FOUNDATION</span>
             <span style={styles.bankVal}>GEO: 5.5</span>
           </div>
-          <div style={styles.statusLight}>
-            Q3 IN PROGRESS
-          </div>
+          <div style={styles.statusLight}>Q3 IN PROGRESS</div>
         </div>
       </header>
 
-      {/* LIST */}
       <div style={styles.list}>
         {sortedClasses.map(cls => {
           const s1Avg = getSemesterAvg(cls.sem1);
           const s2Avg = getSemesterAvg(cls.sem2);
           const isExpanded = expanded === cls.id;
-
           return (
             <div key={cls.id} onClick={() => setExpanded(isExpanded ? null : cls.id)} style={styles.cardWrapper}>
               <div style={styles.card}>
@@ -338,12 +277,10 @@ export default function ThreatEngine() {
         })}
       </div>
 
-      {/* LOG */}
       <div style={styles.log}>
         {logs.map((l, i) => <div key={i} style={{ color: l.type === 'err' ? '#FF1744' : l.type === 'ok' ? '#00FF41' : '#666' }}>{`> ${l.msg}`}</div>)}
       </div>
 
-      {/* INPUT */}
       <footer style={styles.footer}>
         <span style={styles.prompt}>{`>`}</span>
         <input ref={inputRef} value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { handleCmd(cmd); setCmd(''); }}} style={styles.input} />
@@ -364,7 +301,6 @@ const styles: { [key: string]: React.CSSProperties } = {
   modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '10px' },
   cancelBtn: { background: 'transparent', color: '#666', border: '1px solid #333', padding: '5px 15px', cursor: 'pointer' },
   injectBtn: { background: '#00FF41', color: '#000', border: 'none', padding: '5px 15px', fontWeight: 'bold', cursor: 'pointer' },
-  hint: { fontSize: '0.7rem', color: '#666' },
   
   hud: { borderBottom: '2px solid #333', padding: '15px', background: '#050505' },
   rowTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '10px' },
