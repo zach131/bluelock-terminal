@@ -1,47 +1,35 @@
 'use client';
 
-import Link from 'next/link';
-
 export default function Architecture() {
   return (
-    <main style={styles.main}>
-      <header style={styles.header}>
-        <div style={styles.headerTitle}>CORE_08: ARCHITECTURE</div>
-        <div style={styles.headerSubtitle}>DEVELOPMENT MATRIX</div>
+    <main style={s.main}>
+      <header style={{...s.header, borderBottomColor: '#00B0FF'}}>
+        <div style={{...s.title, color: '#00B0FF'}}>CORE_08: ARCHITECTURE</div>
+        <div style={s.sub}>DEVELOPMENT MATRIX</div>
       </header>
-
-      <div style={styles.content}>
-        <div style={styles.card}>
-          <div style={styles.statusAlert}>SYSTEM ONLINE</div>
-          <p style={styles.text}>
-            Tracking coding hours, features shipped, and skills acquired.
-          </p>
-          <div style={styles.placeholderBox}>
-            <span style={styles.placeholderText}>COMMIT HISTORY / SKILL TREE</span>
-          </div>
+      <div style={s.content}>
+        <div style={s.card}>
+          <div style={s.status}>SYSTEM ONLINE</div>
+          <p style={s.text}>Tracking coding hours, features shipped, and skills acquired.</p>
+          <div style={s.box}><span style={s.boxText}>COMMIT HISTORY / SKILL TREE</span></div>
         </div>
       </div>
-
-      <footer style={styles.footer}>
-        <Link href="/" style={styles.backLink}>
-          ⟵ RETURN TO MAINFRAME
-        </Link>
-      </footer>
+      <footer style={s.footer}><a href="/" style={s.link}>⟵ MAINFRAME</a></footer>
     </main>
   );
 }
 
-const styles: { [key: string]: React.CSSProperties } = {
-  main: { minHeight: '100vh', backgroundColor: '#0A0A0A', color: '#FFFFFF', fontFamily: '"Orbitron", system-ui, sans-serif', display: 'flex', flexDirection: 'column' },
-  header: { padding: '1rem', textAlign: 'center', borderBottom: '1px solid #00B0FF', backgroundColor: '#0A0A0A' },
-  headerTitle: { fontSize: '0.9rem', fontWeight: 'bold', color: '#00B0FF', letterSpacing: '0.2em' },
-  headerSubtitle: { fontSize: '0.7rem', color: '#666', marginTop: '0.25rem', letterSpacing: '0.1em' },
-  content: { flex: 1, padding: '1rem', maxWidth: '600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' },
-  card: { backgroundColor: '#111', border: '1px solid #333', padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'center' },
-  statusAlert: { color: '#00FF7F', fontSize: '0.8rem', letterSpacing: '0.2em', marginBottom: '1rem' },
-  text: { color: '#AAA', fontSize: '0.9rem', lineHeight: 1.6 },
-  placeholderBox: { marginTop: '1rem', height: '200px', border: '1px dashed #333', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#0F0F0F' },
-  placeholderText: { color: '#444', fontSize: '0.8rem' },
+const s: {[key:string]:React.CSSProperties} = {
+  main: { minHeight: '100vh', background: '#0A0A0A', color: '#FFF', display: 'flex', flexDirection: 'column' },
+  header: { padding: '1.5rem', textAlign: 'center', borderBottom: '2px solid' },
+  title: { fontSize: '0.9rem', fontWeight: 'bold', letterSpacing: '0.2em' },
+  sub: { fontSize: '0.7rem', color: '#666', marginTop: '0.25rem' },
+  content: { flex: 1, padding: '1rem', maxWidth: '600px', margin: '0 auto' },
+  card: { background: '#111', border: '1px solid #222', padding: '1.5rem', textAlign: 'center' },
+  status: { color: '#00FF7F', fontSize: '0.8rem', letterSpacing: '0.2em' },
+  text: { color: '#888', fontSize: '0.85rem', lineHeight: 1.6 },
+  box: { marginTop: '1rem', height: '150px', border: '1px dashed #222', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0F0F0F' },
+  boxText: { color: '#333', fontSize: '0.7rem' },
   footer: { textAlign: 'center', padding: '1rem', borderTop: '1px solid #222' },
-  backLink: { color: '#00F0FF', textDecoration: 'none', fontSize: '0.8rem', letterSpacing: '0.1em', cursor: 'pointer' },
+  link: { color: '#00F0FF', textDecoration: 'none', fontSize: '0.8rem' },
 };
