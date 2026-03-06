@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export default function ThreatLayout({ children }: { children: React.ReactNode }) {
@@ -14,33 +13,32 @@ export default function ThreatLayout({ children }: { children: React.ReactNode }
 
   return (
     <div style={styles.container}>
-      {/* Sub-Nav */}
       <nav style={styles.nav}>
-        {links.map(l => (
-          <Link key={l.href} href={l.href} style={{
-            ...styles.link,
-            borderBottom: path === l.href ? '2px solid #00FF41' : 'none',
-            color: path === l.href ? '#00FF41' : '#666'
-          }}>
-            {l.label}
-          </Link>
-        ))}
-        <div style={{ flex: 1 }} />
-        <Link href="/" style={styles.homeLink}>[MAINFRAME]</Link>
+        <div style={styles.navBrand}>THREAT ENGINE</div>
+        <div style={styles.navLinks}>
+          {links.map(l => (
+            <a key={l.href} href={l.href} style={{
+              ...styles.link,
+              borderBottom: path === l.href ? '2px solid #FF1744' : 'none',
+              color: path === l.href ? '#FF1744' : '#666'
+            }}>
+              {l.label}
+            </a>
+          ))}
+        </div>
+        <a href="/" style={styles.homeLink}>[MAINFRAME]</a>
       </nav>
-      
-      {/* Content */}
-      <div style={styles.content}>
-        {children}
-      </div>
+      <div style={styles.content}>{children}</div>
     </div>
   );
 }
 
 const styles: { [key: string]: React.CSSProperties } = {
-  container: { display: 'flex', flexDirection: 'column', height: '100vh', background: '#000', color: '#FFF', fontFamily: 'monospace' },
-  nav: { display: 'flex', alignItems: 'center', padding: '10px 20px', borderBottom: '1px solid #222', background: '#050505' },
-  link: { padding: '5px 15px', fontSize: '0.8rem', letterSpacing: '1px', textDecoration: 'none' },
-  homeLink: { fontSize: '0.7rem', color: '#00F0FF', textDecoration: 'none', border: '1px solid #333', padding: '2px 8px' },
+  container: { display: 'flex', flexDirection: 'column', minHeight: '100vh', background: '#0A0A0A', color: '#FFF' },
+  nav: { display: 'flex', alignItems: 'center', padding: '12px 20px', borderBottom: '1px solid #222', background: '#050505', gap: '1rem' },
+  navBrand: { fontSize: '0.8rem', fontWeight: 'bold', color: '#FF1744', letterSpacing: '0.1em' },
+  navLinks: { display: 'flex', flex: 1 },
+  link: { padding: '8px 15px', fontSize: '0.75rem', letterSpacing: '1px', textDecoration: 'none' },
+  homeLink: { fontSize: '0.7rem', color: '#666', textDecoration: 'none', border: '1px solid #333', padding: '4px 10px' },
   content: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
 };
