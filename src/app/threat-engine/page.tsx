@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 
+// ... (Keep Types) ...
 type SubjectID = 'alg' | 'csp' | 'aphu' | 'bio' | 'eng' | 'spa' | 'band';
 interface GradeEntry { earned: number; possible: number; }
 interface SemesterData { q1: GradeEntry[]; q2: GradeEntry[]; q3: GradeEntry[]; }
@@ -10,6 +12,7 @@ interface ThreatData { classes: ClassData[]; rank: { current: number; total: num
 
 const SYNC_KEY = 'bluelock_threat_engine';
 
+// ... (Keep Constants & Helpers) ...
 const SUBJECT_MAP: { [key: string]: { name: string; id: SubjectID; level: 'L1' | 'L2' } } = {
   'm': { name: 'Algebra II', id: 'alg', level: 'L1' },
   'cs': { name: 'AP CSP', id: 'csp', level: 'L1' },
@@ -58,7 +61,7 @@ function createDefaultClasses(): ClassData[] {
 export default function ThreatEngine() {
   const [data, setData] = useState<ThreatData>({ classes: [], rank: { current: 76, total: 736 } });
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | 'idle'>('idle');
   const [cmd, setCmd] = useState('');
   const [logs, setLogs] = useState<{type: string, msg: string}[]>([]);
   const [expanded, setExpanded] = useState<SubjectID | null>(null);
@@ -73,7 +76,7 @@ export default function ThreatEngine() {
       try {
         const res = await fetch(`/api/sync?key=${SYNC_KEY}`);
         const json = await res.json();
-        if (json.success && json.data) { setData(json.data); addLog('ok', 'CLOUD LOADED'); }
+        if (json.success && json.data) { setData(json.data); setSaveStatus('saved'); addLog('ok', 'CLOUD LOADED'); }
         else { setData(prev => ({ ...prev, classes: createDefaultClasses() })); addLog('info', 'INIT DEFAULTS'); }
       } catch (e) { addLog('err', 'LOAD FAILED'); setData(prev => ({ ...prev, classes: createDefaultClasses() })); }
       setLoading(false);
@@ -81,16 +84,23 @@ export default function ThreatEngine() {
     loadData();
   }, [addLog]);
 
-  useEffect(() => {
-    if (loading) return;
-    const timer = setTimeout(async () => {
-      setSaving(true);
-      try { await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: SYNC_KEY, payload: data }) }); }
-      catch (e) { addLog('err', 'SAVE FAILED'); }
-      setTimeout(() => setSaving(false), 500);
-    }, 1000);
-    return () => clearTimeout(timer);
-  }, [data, loading, addLog]);
+  const saveToCloud = useCallback(async () => {
+    setSaveStatus('saving');
+    addLog('info', 'SAVING...');
+    try { 
+      const res = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: SYNC_KEY, payload: data }) });
+      const json = await res.json();
+      if(json.success) {
+        setSaveStatus('saved');
+        addLog('ok', 'CLOUD SYNCED');
+      } else {
+        throw new Error('API Error');
+      }
+    } catch (e) { 
+      addLog('err', 'SAVE FAILED'); 
+      setSaveStatus('error');
+    }
+  }, [data, addLog]);
 
   useEffect(() => {
     const handleKey = () => { if(!importMode) inputRef.current?.focus(); };
@@ -101,6 +111,7 @@ export default function ThreatEngine() {
   const handleCmd = (raw: string) => {
     const c = raw.trim().toLowerCase();
     if (c === 'import') { setImportMode(true); return; }
+    if (c === 'save') { saveToCloud(); return; } // Allow manual save via command too
     if (c === 'clear') { setLogs([]); return; }
     if (c.startsWith('+')) {
       const parts = raw.split(' ');
@@ -125,6 +136,7 @@ export default function ThreatEngine() {
         return { ...cls, sem1: newSem1, sem2: newSem2 };
       });
       addLog('ok', `LOGGED: ${SUBJECT_MAP[id]?.name || id} [${period}]`);
+      setSaveStatus('idle'); // Mark as dirty
       return { ...prev, classes: newClasses };
     });
   };
@@ -140,6 +152,7 @@ export default function ThreatEngine() {
 
   return (
     <main style={s.main}>
+      {/* ... (Keep Import Modal JSX) ... */}
       {importMode && (
         <div style={s.overlay}>
           <div style={s.modal}>
@@ -162,13 +175,27 @@ export default function ThreatEngine() {
           </div>
         </div>
       )}
+
       <header style={s.hud}>
         <div style={s.rowTop}>
           <div style={s.col}><span style={s.label}>RANK</span><span style={{...s.val, color:'#00F0FF'}}>{data.rank.current}/{data.rank.total}</span></div>
-          <div style={s.col}><span style={s.label}>GPA</span><span style={{...s.val, color: gpa>=5.75?'#00FF41':'#FFB000'}}>{gpa.toFixed(3)} {saving && <span style={{fontSize:'0.5rem',color:'#666'}}>SYNC</span>}</span></div>
+          <div style={s.col}><span style={s.label}>GPA</span><span style={{...s.val, color: gpa>=5.75?'#00FF41':'#FFB000'}}>{gpa.toFixed(3)}</span></div>
+          {/* NEW: Save Button in HUD */}
+          <button onClick={saveToCloud} style={{
+            padding: '0.5rem 1rem', 
+            background: saveStatus === 'saving' ? '#333' : saveStatus === 'saved' ? '#003300' : 'transparent', 
+            border: `1px solid ${saveStatus === 'saved' ? '#00FF41' : '#FF1744'}`,
+            color: saveStatus === 'saved' ? '#00FF41' : '#FFF',
+            fontSize: '0.7rem',
+            cursor: 'pointer'
+          }}>
+            {saveStatus === 'saving' ? 'SYNCING...' : saveStatus === 'saved' ? 'SAVED ✓' : 'SAVE'}
+          </button>
         </div>
         <div style={s.hudBot}><span style={{color:'#666'}}>GEO: 5.5</span><span style={{color:'#FFB000'}}>Q3</span></div>
       </header>
+
+      {/* ... (Keep Class List, Log, Footer JSX) ... */}
       <div style={s.list}>
         {sortedClasses.map(cls => {
           const s1 = getSemesterAvg(cls.sem1), s2 = getSemesterAvg(cls.sem2);
@@ -198,13 +225,14 @@ export default function ThreatEngine() {
       <div style={s.log}>{logs.map((l,i) => <div key={i} style={{color: l.type==='err'?'#FF1744':l.type==='ok'?'#00FF41':'#666'}}>&gt; {l.msg}</div>)}</div>
       <footer style={s.footer}>
         <span style={{color:'#FF1744'}}>&gt;</span>
-        <input ref={inputRef} value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { handleCmd(cmd); setCmd(''); }}} placeholder="type 'import' or '+m q1 95 92'..." style={s.input} />
+        <input ref={inputRef} value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { handleCmd(cmd); setCmd(''); }}} placeholder="type 'import', 'save' or '+m q1 95 92'..." style={s.input} />
       </footer>
     </main>
   );
 }
 
 const s: { [key: string]: React.CSSProperties } = {
+  // ... (Keep existing styles) ...
   main: { flex: 1, background: '#0A0A0A', color: '#FFF', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   overlay: { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modal: { width: '90%', maxWidth: '500px', background: '#111', border: '1px solid #FF1744', padding: '20px' },
