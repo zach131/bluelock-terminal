@@ -1,13 +1,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link'; // Import Link
 
-// ═══════════════════════════════════════════════════════════════
-// BLUE LOCK TERMINAL - MAINFRAME LAUNCHER
-// Password Protected Entry Point
-// ═══════════════════════════════════════════════════════════════
-
-const CORRECT_PASSWORD = 'bluelock'; // Change this to your desired password
+// ... (Keep existing constants: CORRECT_PASSWORD, SESSION_KEY, CORES) ...
+const CORRECT_PASSWORD = 'bluelock'; 
 const SESSION_KEY = 'bluelock_session';
 
 const CORES = [
@@ -22,7 +19,7 @@ const CORES = [
   { id: 'chessboard', name: 'CHESSBOARD', sub: 'Social Map', color: '#FFAB00', path: '/chessboard' },
 ];
 
-// Password Gate Component
+// ... (Keep PasswordGate component exactly as is) ...
 function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
@@ -89,6 +86,11 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
 
 // Main Dashboard Component
 function Mainframe() {
+  const handleLogout = () => {
+    sessionStorage.removeItem(SESSION_KEY);
+    window.location.reload();
+  };
+
   return (
     <main style={styles.main}>
       <header style={styles.header}>
@@ -98,21 +100,25 @@ function Mainframe() {
       </header>
       <div style={styles.gridContainer}>
         {CORES.map((core) => (
-          <a href={core.path} key={core.id} style={styles.coreCardLink}>
+          // CHANGED: <a> to <Link> to prevent page reload killing save processes
+          <Link href={core.path} key={core.id} style={styles.coreCardLink}>
             <div style={{ ...styles.coreCard, borderColor: core.color }}>
               <div style={{ ...styles.coreName, color: core.color }}>{core.name}</div>
               <div style={styles.coreSub}>{core.sub}</div>
               <div style={styles.coreId}>{core.id.toUpperCase()}</div>
             </div>
-          </a>
+          </Link>
         ))}
       </div>
-      <footer style={styles.footer}>EVOLVE OR DISAPPEAR.</footer>
+      <footer style={styles.footer}>
+        <div>EVOLVE OR DISAPPEAR.</div>
+        <button onClick={handleLogout} style={styles.logoutBtn}>[LOCK TERMINAL]</button>
+      </footer>
     </main>
   );
 }
 
-// Main Page Component
+// ... (Keep Page component exactly as is) ...
 export default function Page() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mounted, setMounted] = useState(false);
@@ -146,6 +152,7 @@ export default function Page() {
 }
 
 const styles: { [key: string]: React.CSSProperties } = {
+  // ... (Keep existing styles) ...
   loadingContainer: { minHeight: '100vh', backgroundColor: '#0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: '#00F0FF', fontSize: '0.8rem', letterSpacing: '0.3em' },
   gateContainer: { minHeight: '100vh', backgroundColor: '#0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' },
@@ -171,5 +178,7 @@ const styles: { [key: string]: React.CSSProperties } = {
   coreName: { fontSize: '0.75rem', fontWeight: 'bold', lineHeight: 1.1 },
   coreSub: { fontSize: '0.55rem', color: '#666', textTransform: 'uppercase' },
   coreId: { fontSize: '0.45rem', color: '#333', marginTop: '0.5rem' },
-  footer: { textAlign: 'center', padding: '2rem', fontSize: '0.7rem', color: '#333', letterSpacing: '0.1em' },
+  footer: { textAlign: 'center', padding: '2rem', fontSize: '0.7rem', color: '#333', letterSpacing: '0.1em', display: 'flex', flexDirection: 'column', gap: '1rem' },
+  logoutBtn: { background: 'transparent', border: '1px solid #333', color: '#666', padding: '0.5rem 1rem', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.7rem' },
 };
+
