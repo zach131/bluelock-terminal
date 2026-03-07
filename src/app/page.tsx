@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Link from 'next/link'; // Import Link
+import Link from 'next/link';
 
-// ... (Keep existing constants: CORRECT_PASSWORD, SESSION_KEY, CORES) ...
 const CORRECT_PASSWORD = 'bluelock'; 
-const SESSION_KEY = 'bluelock_session';
+const SESSION_KEY = 'bluelock_session_persist'; // Changed key to avoid conflict
 
+// ... (Keep CORES array) ...
 const CORES = [
   { id: 'threat-engine', name: 'THREAT ENGINE', sub: 'Academics', color: '#FF1744', path: '/threat-engine' },
   { id: 'biological-ledger', name: 'BIOLOGICAL LEDGER', sub: 'Iron/Plyometrics', color: '#00FF7F', path: '/biological-ledger' },
@@ -19,7 +19,6 @@ const CORES = [
   { id: 'chessboard', name: 'CHESSBOARD', sub: 'Social Map', color: '#FFAB00', path: '/chessboard' },
 ];
 
-// ... (Keep PasswordGate component exactly as is) ...
 function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState(false);
@@ -28,7 +27,7 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (password.toLowerCase() === CORRECT_PASSWORD) {
-      sessionStorage.setItem(SESSION_KEY, 'authenticated');
+      localStorage.setItem(SESSION_KEY, 'authenticated'); // Use localStorage
       onUnlock();
     } else {
       setError(true);
@@ -37,57 +36,38 @@ function PasswordGate({ onUnlock }: { onUnlock: () => void }) {
       setPassword('');
     }
   };
-
+  
+  // ... (Keep render JSX) ...
   return (
     <div style={styles.gateContainer}>
+      {/* ... existing JSX ... */}
       <div style={styles.gridOverlay} />
       <div style={styles.scanLine} />
-      <div style={{
-        ...styles.gateCard,
-        animation: shake ? 'shake 0.5s ease-in-out' : 'none',
-      }}>
-        <div style={styles.logo}>
-          <span style={styles.logoText}>BL</span>
-        </div>
+      <div style={{ ...styles.gateCard, animation: shake ? 'shake 0.5s ease-in-out' : 'none' }}>
+        <div style={styles.logo}><span style={styles.logoText}>BL</span></div>
         <h1 style={styles.gateTitle}>BLUE LOCK TERMINAL</h1>
         <p style={styles.gateSubtitle}>AUTHENTICATION REQUIRED</p>
         <form onSubmit={handleSubmit} style={styles.form}>
           <input
             type="password"
             value={password}
-            onChange={(e) => {
-              setPassword(e.target.value);
-              setError(false);
-            }}
+            onChange={(e) => { setPassword(e.target.value); setError(false); }}
             placeholder="ENTER PASSWORD"
             autoFocus
-            style={{
-              ...styles.passwordInput,
-              borderColor: error ? '#FF1744' : '#333',
-            }}
+            style={{ ...styles.passwordInput, borderColor: error ? '#FF1744' : '#333' }}
           />
           <button type="submit" style={styles.submitBtn}>ACCESS</button>
         </form>
         {error && <p style={styles.errorText}>ACCESS DENIED</p>}
-        <p style={styles.hint}>
-          {password.length === 0 ? '████████' : '█'.repeat(password.length) + '█'.repeat(8 - password.length)}
-        </p>
       </div>
-      <style>{`
-        @keyframes shake {
-          0%, 100% { transform: translateX(0); }
-          10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
-          20%, 40%, 60%, 80% { transform: translateX(5px); }
-        }
-      `}</style>
+      <style>{`@keyframes shake { 0%, 100% { transform: translateX(0); } 10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); } 20%, 40%, 60%, 80% { transform: translateX(5px); } }`}</style>
     </div>
   );
 }
 
-// Main Dashboard Component
 function Mainframe() {
   const handleLogout = () => {
-    sessionStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY);
     window.location.reload();
   };
 
@@ -100,7 +80,6 @@ function Mainframe() {
       </header>
       <div style={styles.gridContainer}>
         {CORES.map((core) => (
-          // CHANGED: <a> to <Link> to prevent page reload killing save processes
           <Link href={core.path} key={core.id} style={styles.coreCardLink}>
             <div style={{ ...styles.coreCard, borderColor: core.color }}>
               <div style={{ ...styles.coreName, color: core.color }}>{core.name}</div>
@@ -118,41 +97,26 @@ function Mainframe() {
   );
 }
 
-// ... (Keep Page component exactly as is) ...
 export default function Page() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    const session = sessionStorage.getItem(SESSION_KEY);
-    const timer = setTimeout(() => {
-      setIsAuthenticated(session === 'authenticated');
-      setMounted(true);
-    }, 0);
-    return () => clearTimeout(timer);
+    // Check localStorage instead of sessionStorage
+    const session = localStorage.getItem(SESSION_KEY);
+    setIsAuthenticated(session === 'authenticated');
+    setMounted(true);
   }, []);
 
-  const handleUnlock = useCallback(() => {
-    setIsAuthenticated(true);
-  }, []);
+  const handleUnlock = useCallback(() => setIsAuthenticated(true), []);
 
-  if (!mounted) {
-    return (
-      <div style={styles.loadingContainer}>
-        <div style={styles.loadingText}>INITIALIZING...</div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <PasswordGate onUnlock={handleUnlock} />;
-  }
-
+  if (!mounted) return <div style={styles.loadingContainer}><div style={styles.loadingText}>INITIALIZING...</div></div>;
+  if (!isAuthenticated) return <PasswordGate onUnlock={handleUnlock} />;
   return <Mainframe />;
 }
 
+// ... (Keep Styles) ...
 const styles: { [key: string]: React.CSSProperties } = {
-  // ... (Keep existing styles) ...
   loadingContainer: { minHeight: '100vh', backgroundColor: '#0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   loadingText: { color: '#00F0FF', fontSize: '0.8rem', letterSpacing: '0.3em' },
   gateContainer: { minHeight: '100vh', backgroundColor: '#0A0A0A', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden' },
@@ -167,7 +131,6 @@ const styles: { [key: string]: React.CSSProperties } = {
   passwordInput: { background: '#0A0A0A', border: '2px solid #333', color: '#00FF41', padding: '1rem', fontSize: '1rem', fontFamily: 'monospace', textAlign: 'center', letterSpacing: '0.3em', outline: 'none' },
   submitBtn: { background: '#00F0FF', color: '#000', border: 'none', padding: '1rem', fontSize: '0.9rem', fontWeight: 'bold', letterSpacing: '0.2em', cursor: 'pointer' },
   errorText: { color: '#FF1744', fontSize: '0.8rem', letterSpacing: '0.2em', textShadow: '0 0 10px #FF1744' },
-  hint: { color: '#222', fontSize: '0.7rem', fontFamily: 'monospace', letterSpacing: '0.5em' },
   main: { minHeight: '100vh', backgroundColor: '#0A0A0A', color: '#FFFFFF', display: 'flex', flexDirection: 'column', alignItems: 'center' },
   header: { padding: '2rem 1rem 1rem 1rem', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' },
   headerTitle: { fontSize: '1rem', fontWeight: 'bold', color: '#FFF', letterSpacing: '0.2em', marginTop: '0.5rem' },
@@ -181,4 +144,3 @@ const styles: { [key: string]: React.CSSProperties } = {
   footer: { textAlign: 'center', padding: '2rem', fontSize: '0.7rem', color: '#333', letterSpacing: '0.1em', display: 'flex', flexDirection: 'column', gap: '1rem' },
   logoutBtn: { background: 'transparent', border: '1px solid #333', color: '#666', padding: '0.5rem 1rem', cursor: 'pointer', fontFamily: 'inherit', fontSize: '0.7rem' },
 };
-
