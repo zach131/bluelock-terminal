@@ -1,19 +1,22 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 
 interface Rival { id: string; rank: number; name: string; gpa: number; isConfirmed: boolean; }
 interface LeaderboardData { rivals: Rival[]; }
 
 const SYNC_KEY = 'bluelock_leaderboard';
+const LOCAL_KEY = 'backup_leaderboard';
 
 export default function Leaderboard() {
   const [data, setData] = useState<LeaderboardData>({ rivals: [] });
   const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | 'idle'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'syncing' | 'error' | 'local'>('idle');
   const [form, setForm] = useState({ rank: '', name: '', gpa: '' });
+  
+  const saveTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // 1. Load data on mount
+  // 1. Initial Load (Cloud -> Local Fallback)
   useEffect(() => {
     async function loadData() {
       try {
@@ -22,40 +25,68 @@ export default function Leaderboard() {
         if (json.success && json.data?.rivals) {
           setData(json.data);
           setSaveStatus('saved');
+          localStorage.setItem(LOCAL_KEY, JSON.stringify(json.data));
         } else {
-          // Initialize with self if empty
+          throw new Error("Cloud empty");
+        }
+      } catch (e) {
+        // Ghost Protocol: Load from Local
+        const local = localStorage.getItem(LOCAL_KEY);
+        if (local) {
+          setData(JSON.parse(local));
+          setSaveStatus('local');
+        } else {
+          // Genesis Object: Create Self
           setData({ rivals: [{ id: 'self', rank: 70, name: 'ZACH', gpa: 5.2, isConfirmed: true }] });
           setSaveStatus('idle');
         }
-      } catch (e) { 
-        console.error(e);
-        setSaveStatus('error');
       }
       setLoading(false);
     }
     loadData();
   }, []);
 
-  // 2. Manual Save Function (Triggered by Button)
-  const saveToCloud = useCallback(async () => {
+  // 2. Persistence Layer (Auto-Save + Manual)
+  const saveToCloud = useCallback(async (newData: LeaderboardData) => {
     setSaveStatus('saving');
     try {
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: SYNC_KEY, payload: data })
+        body: JSON.stringify({ key: SYNC_KEY, payload: newData })
       });
       const json = await res.json();
       if (json.success) {
         setSaveStatus('saved');
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(newData));
+        setTimeout(() => setSaveStatus('syncing'), 2000);
       } else {
-        setSaveStatus('error');
+        throw new Error("API Error");
       }
     } catch (e) {
       console.error(e);
       setSaveStatus('error');
+      // Ghost Protocol: Save Locally
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(newData));
+      localStorage.setItem(`${SYNC_KEY}_pending`, 'true');
     }
-  }, [data]);
+  }, []);
+
+  // Debounced Auto-Save
+  useEffect(() => {
+    if (loading) return;
+    
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    
+    setSaveStatus('syncing'); // Indicate change waiting
+    saveTimeout.current = setTimeout(() => {
+      saveToCloud(data);
+    }, 1000);
+
+    return () => {
+      if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    };
+  }, [data, loading, saveToCloud]);
 
   const addIntel = () => {
     const newRank = parseInt(form.rank), newGpa = parseFloat(form.gpa);
@@ -73,12 +104,10 @@ export default function Leaderboard() {
     });
     
     setForm({ rank: '', name: '', gpa: '' });
-    setSaveStatus('idle'); // Mark as "dirty" / needs saving
   };
 
   const removeIntel = (id: string) => {
     setData(prev => ({ rivals: prev.rivals.filter(r => r.id !== id) }));
-    setSaveStatus('idle'); // Mark as "dirty"
   };
 
   const fullLeaderboard = useMemo(() => {
@@ -101,7 +130,7 @@ export default function Leaderboard() {
     return list;
   }, [data.rivals]);
 
-  if (loading) return <div style={s.main}>LOADING...</div>;
+  if (loading) return <div style={s.main}>CONNECTING...</div>;
 
   return (
     <div style={s.main}>
@@ -111,9 +140,9 @@ export default function Leaderboard() {
           {/* Status Indicator */}
           <span style={{
             fontSize: '0.6rem',
-            color: saveStatus === 'saved' ? '#00FF41' : saveStatus === 'saving' ? '#FFB000' : saveStatus === 'error' ? '#FF1744' : '#666'
+            color: saveStatus === 'saved' ? '#00FF41' : saveStatus === 'saving' ? '#FFB000' : saveStatus === 'local' ? '#2979FF' : '#FF1744'
           }}>
-            {saveStatus === 'saved' ? '● CLOUD SYNCED' : saveStatus === 'saving' ? '● SYNCING...' : saveStatus === 'error' ? '● FAILED' : '○ LOCAL CHANGES'}
+            {saveStatus === 'saved' ? '● CLOUD SYNCED' : saveStatus === 'saving' ? '● SYNCING...' : saveStatus === 'local' ? '● LOCAL MODE' : '○ DIRTY'}
           </span>
         </div>
         <div style={s.form}>
@@ -123,12 +152,12 @@ export default function Leaderboard() {
           <button onClick={addIntel} style={s.addBtn}>LOG</button>
         </div>
         {/* Manual Save Button */}
-        <button onClick={saveToCloud} disabled={saveStatus === 'saving'} style={{
+        <button onClick={() => saveToCloud(data)} disabled={saveStatus === 'saving'} style={{
           ...s.saveBtn,
           opacity: saveStatus === 'saving' ? 0.5 : 1,
           borderColor: saveStatus === 'saved' ? '#00FF41' : '#333'
         }}>
-          {saveStatus === 'saving' ? 'SYNCING...' : 'SAVE TO CLOUD'}
+          {saveStatus === 'saving' ? 'SYNCING...' : 'FORCE SYNC'}
         </button>
       </div>
       
@@ -161,20 +190,11 @@ export default function Leaderboard() {
 const s: { [key: string]: React.CSSProperties } = {
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#0A0A0A' },
   console: { background: '#050505', padding: '10px 15px', borderBottom: '1px solid #222', display: 'flex', flexDirection: 'column', gap: '10px' },
-  consoleHeader: { fontSize: '0.7rem', color: '#FF1744', letterSpacing: '2px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  consoleHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   form: { display: 'flex', gap: '8px' },
   input: { background: '#000', border: '1px solid #333', color: '#FFF', padding: '10px', fontSize: '0.85rem' },
   addBtn: { background: '#FF1744', color: '#FFF', border: 'none', fontWeight: 'bold', padding: '0 20px', cursor: 'pointer' },
-  saveBtn: { 
-    width: '100%', 
-    padding: '10px', 
-    background: 'transparent', 
-    border: '1px solid', 
-    color: '#FFF', 
-    fontWeight: 'bold', 
-    cursor: 'pointer',
-    transition: 'all 0.2s'
-  },
+  saveBtn: { width: '100%', padding: '10px', background: 'transparent', border: '1px solid', color: '#FFF', fontWeight: 'bold', cursor: 'pointer', transition: 'all 0.2s' },
   confirmed: { background: '#0F0F0F', padding: '10px 15px', borderBottom: '1px solid #222' },
   secTitle: { fontSize: '0.65rem', color: '#666', marginBottom: '10px' },
   confRow: { display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderLeft: '3px solid', marginBottom: '5px' },
