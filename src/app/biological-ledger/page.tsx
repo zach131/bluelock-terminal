@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 
-// ... (Keep Interfaces: Set, Exercise, WorkoutSession, PlyometricLog, FitnessData) ...
+// --- Types ---
 interface Set { weight: number; reps: number; id: string; }
 interface Exercise { name: string; sets: Set[]; isPR?: boolean; }
 interface WorkoutSession { id: string; date: string; type: 'push' | 'pull' | 'legs' | 'cardio' | 'plyo' | 'other'; exercises: Exercise[]; totalVolume: number; }
@@ -12,10 +12,11 @@ interface FitnessData { workouts: WorkoutSession[]; plyometrics: PlyometricLog[]
 
 type ViewMode = 'log' | 'history' | 'plyo' | 'prs';
 const SYNC_KEY = 'bluelock_biological_ledger';
+const LOCAL_KEY = 'backup_biological_ledger';
 const generateId = () => Math.random().toString(36).substring(2, 9);
 const getToday = () => new Date().toISOString().split('T')[0];
 
-// ... (Keep Helper Functions: calculateStreak, getWeeklyWorkouts) ...
+// --- Helpers ---
 function calculateStreak(workouts: WorkoutSession[]): number {
   if (workouts.length === 0) return 0;
   const sortedDates = [...new Set(workouts.map(w => w.date))].sort().reverse();
@@ -40,7 +41,7 @@ function getWeeklyWorkouts(workouts: WorkoutSession[]): number {
 export default function BiologicalLedger() {
   const [data, setData] = useState<FitnessData>({ workouts: [], plyometrics: [], personalRecords: {}, streak: 0, lastWorkoutDate: null, totalWorkouts: 0 });
   const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'error' | 'idle'>('idle');
+  const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'syncing' | 'error' | 'local'>('idle');
   const [view, setView] = useState<ViewMode>('log');
   const [currentWorkout, setCurrentWorkout] = useState<WorkoutSession | null>(null);
   const [exerciseName, setExerciseName] = useState('');
@@ -50,8 +51,11 @@ export default function BiologicalLedger() {
   const [workoutType, setWorkoutType] = useState<WorkoutSession['type']>('push');
   const [verticalJump, setVerticalJump] = useState('');
   const [broadJump, setBroadJump] = useState('');
+  
+  // Ref for debounce
+  const saveTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Load data once on mount
+  // 1. Initial Load (Cloud -> Local Fallback)
   useEffect(() => {
     async function loadData() {
       try {
@@ -60,38 +64,67 @@ export default function BiologicalLedger() {
         if (json.success && json.data) {
           setData(json.data);
           setSaveStatus('saved');
+          // Cache locally
+          localStorage.setItem(LOCAL_KEY, JSON.stringify(json.data));
+        } else {
+          throw new Error("Cloud empty or failed");
         }
-      } catch (e) { 
-        console.error('Failed to load:', e); 
-        setSaveStatus('error');
+      } catch (e) {
+        // Ghost Protocol: Load from Local
+        const localData = localStorage.getItem(LOCAL_KEY);
+        if (localData) {
+          setData(JSON.parse(localData));
+          setSaveStatus('local'); // Indicate offline mode
+        }
       }
       setLoading(false);
     }
     loadData();
   }, []);
 
-  // Manual Save Function
-  const saveToCloud = useCallback(async () => {
+  // 2. The Persistence Layer (Auto-Save + Manual)
+  const saveToCloud = useCallback(async (newData: FitnessData) => {
     setSaveStatus('saving');
     try {
-      const res = await fetch('/api/sync', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ key: SYNC_KEY, payload: data }) 
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: SYNC_KEY, payload: newData })
       });
       const json = await res.json();
       if (json.success) {
         setSaveStatus('saved');
+        localStorage.setItem(LOCAL_KEY, JSON.stringify(newData)); // Update local cache
+        setTimeout(() => setSaveStatus('syncing'), 2000); // Visual feedback reset
       } else {
-        setSaveStatus('error');
+        throw new Error("API Error");
       }
     } catch (e) {
-      console.error('Failed to save:', e);
+      console.error(e);
       setSaveStatus('error');
+      // Ghost Protocol: Save locally for later sync
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(newData));
+      localStorage.setItem(`${SYNC_KEY}_pending`, 'true');
     }
-  }, [data]);
+  }, []);
 
-  // ... (Keep Logic Functions: startWorkout, addSet, saveExercise, finishWorkout, logPlyo, deleteWorkout) ...
+  // Debounced Auto-Save (Silent Save Pattern)
+  useEffect(() => {
+    if (loading) return; // Don't save on initial load
+    
+    if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    
+    setSaveStatus('syncing'); // Indicate change happening
+    saveTimeout.current = setTimeout(() => {
+      saveToCloud(data);
+    }, 1000);
+
+    return () => {
+      if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    };
+  }, [data, loading, saveToCloud]);
+
+  // --- Logic Functions (Optimized) ---
   const startWorkout = () => setCurrentWorkout({ id: generateId(), date: getToday(), type: workoutType, exercises: [], totalVolume: 0 });
   
   const addSet = () => {
@@ -145,23 +178,19 @@ export default function BiologicalLedger() {
         <div style={s.headerSubtitle}>PHYSICAL EVOLUTION</div>
       </header>
       
-      {/* NEW: Trustworthy Save UI */}
+      {/* UX: Silent Save Status with Manual Override */}
       <div style={s.controlBar}>
         <div style={s.saveInfo}>
           <span style={{
             ...s.statusDot, 
-            backgroundColor: saveStatus === 'saved' ? '#00FF41' : saveStatus === 'saving' ? '#FFB000' : '#FF1744'
+            backgroundColor: saveStatus === 'saved' ? '#00FF41' : saveStatus === 'saving' ? '#FFB000' : saveStatus === 'local' ? '#2979FF' : '#FF1744'
           }} />
           <span style={{color: '#888', fontSize: '0.7rem'}}>
-            {saveStatus === 'saved' ? 'CLOUD SYNCED' : saveStatus === 'saving' ? 'SAVING...' : saveStatus === 'error' ? 'CONNECTION LOST' : 'READY'}
+            {saveStatus === 'saved' ? 'CLOUD SYNCED' : saveStatus === 'saving' ? 'SYNCING...' : saveStatus === 'local' ? 'LOCAL MODE' : 'ERROR'}
           </span>
         </div>
-        <button onClick={saveToCloud} disabled={saveStatus === 'saving'} style={{
-          ...s.saveBtn, 
-          opacity: saveStatus === 'saving' ? 0.5 : 1,
-          border: saveStatus === 'saved' ? '1px solid #00FF41' : '1px solid #333'
-        }}>
-          {saveStatus === 'saving' ? 'SAVING...' : 'FORCE SAVE'}
+        <button onClick={() => saveToCloud(data)} style={{...s.saveBtn, border: '1px solid #333'}}>
+          FORCE SYNC
         </button>
       </div>
 
@@ -177,7 +206,6 @@ export default function BiologicalLedger() {
         ))}
       </nav>
       
-      {/* ... (Keep existing View Logic: log, history, plyo, prs) ... */}
       <div style={s.content}>
         {view === 'log' && (currentWorkout ? (
           <div style={s.form}>
@@ -191,7 +219,7 @@ export default function BiologicalLedger() {
                 <input type="number" placeholder="REPS" value={reps} onChange={e=>setReps(e.target.value)} style={s.smallInput} />
                 <button onClick={addSet} style={s.addBtn}>+</button>
               </div>
-              {sets.length > 0 && <button onClick={saveExercise} style={s.saveBtn}>SAVE EXERCISE</button>}
+              {sets.length > 0 && <button onClick={saveExercise} style={s.exerciseBtn}>SAVE EXERCISE</button>}
             </div>
             {currentWorkout.exercises.length > 0 && (
               <div style={s.session}>
@@ -273,16 +301,15 @@ export default function BiologicalLedger() {
 }
 
 const s: { [key: string]: React.CSSProperties } = {
-  // ... (Keep existing styles, add new controlBar styles) ...
   main: { minHeight: '100vh', backgroundColor: '#0A0A0A', color: '#FFF', display: 'flex', flexDirection: 'column' },
   loading: { flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#00FF7F' },
-  header: { padding: '1rem', textAlign: 'center', borderBottom: '2px solid #00FF7F', position: 'relative' },
+  header: { padding: '1rem', textAlign: 'center', borderBottom: '2px solid #00FF7F' },
   headerTitle: { fontSize: '0.9rem', fontWeight: 'bold', color: '#00FF7F', letterSpacing: '0.2em' },
   headerSubtitle: { fontSize: '0.7rem', color: '#666', letterSpacing: '0.1em' },
   controlBar: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', backgroundColor: '#111', borderBottom: '1px solid #222' },
   saveInfo: { display: 'flex', alignItems: 'center', gap: '0.5rem' },
   statusDot: { width: '8px', height: '8px', borderRadius: '50%' },
-  saveBtn: { background: 'transparent', color: '#FFF', padding: '0.5rem 1rem', fontSize: '0.7rem', cursor: 'pointer', transition: 'all 0.2s' },
+  saveBtn: { background: 'transparent', color: '#FFF', padding: '0.5rem 1rem', fontSize: '0.7rem', cursor: 'pointer' },
   statsBar: { display: 'flex', justifyContent: 'space-around', padding: '1rem', backgroundColor: '#0A0A0A' },
   stat: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.25rem' },
   statVal: { fontSize: '1.5rem', fontWeight: 'bold', color: '#00FF7F' },
@@ -304,6 +331,7 @@ const s: { [key: string]: React.CSSProperties } = {
   row: { display: 'flex', alignItems: 'center', gap: '0.5rem' },
   smallInput: { width: '60px', padding: '0.5rem', background: '#0A0A0A', border: '1px solid #333', color: '#FFF', textAlign: 'center' },
   addBtn: { padding: '0.5rem 1rem', background: '#222', border: '1px solid #333', color: '#FFF', cursor: 'pointer' },
+  exerciseBtn: { padding: '0.75rem', background: '#00FF7F', color: '#000', border: 'none', fontWeight: 'bold', cursor: 'pointer' },
   session: { padding: '1rem', backgroundColor: '#0F0F0F', border: '1px solid #222' },
   sessionHeader: { color: '#00FF7F', fontSize: '0.7rem', marginBottom: '0.5rem' },
   exItem: { display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #1A1A1A' },
